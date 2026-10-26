@@ -21,7 +21,7 @@ def require_csrf(
     request: Request,
     x_csrf_token: str | None = Header(
         default=None, alias="X-CSRF-Token",
-        description="필수 문자열. 먼저 GET /api/auth/csrf 실행 후 응답의 csrf_token 값만 복사하세요(큰따옴표 제외). 로그인·비회원 세션 발급 후에는 해당 응답의 새 값 사용. 10분 유효. 누락·불일치·만료는 403. 로그인/이메일 인증 토큰과 다릅니다.",
+        description="필수. /api/auth/csrf 응답의 최신 csrf_token. 10분 유효.",
     ),
 ):
     settings = request.app.state.settings

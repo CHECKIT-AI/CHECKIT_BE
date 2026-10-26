@@ -22,7 +22,7 @@ class EmailInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(
         max_length=254, title="이메일 주소",
-        description="필수. 서비스 회원 이메일 문자열. 앞뒤 공백을 제거하고 소문자로 처리합니다. 최대 254자.",
+        description="필수. 회원 이메일, 최대 254자.",
         examples=[""],
     )
 
@@ -38,7 +38,7 @@ class EmailInput(BaseModel):
 class Credentials(EmailInput):
     password: SecretStr = Field(
         min_length=1, max_length=128, title="회원 비밀번호",
-        description="필수. 가입 시 정한 서비스 회원용 비밀번호 문자열입니다. DB 접속 비밀번호가 아닙니다.",
+        description="필수. 가입 시 정한 회원 비밀번호.",
         examples=[""],
     )
 
@@ -46,7 +46,7 @@ class Credentials(EmailInput):
 class SignupInput(Credentials):
     password: SecretStr = Field(
         min_length=1, max_length=128, title="새 회원 비밀번호",
-        description="필수. 새로 정할 12~128자 문자열. 빈칸에 실제 사용할 비밀번호를 입력하세요.",
+        description="필수. 새 비밀번호, 12~128자.",
         examples=[""],
         # The existing endpoint checks the same minimum and returns PASSWORD_POLICY.
         json_schema_extra={"minLength": 12},
@@ -56,7 +56,7 @@ class SignupInput(Credentials):
 class LoginInput(Credentials):
     claim_contract_id: UUID | None = Field(
         default=None, title="함께 저장할 비회원 계약서 ID",
-        description="선택. 비회원 완료 결과를 로그인 계정으로 저장할 때만 실제 UUID 문자열 입력. 일반 로그인은 생략하거나 null.",
+        description="선택. 함께 저장할 비회원 계약서 UUID. 일반 로그인은 null.",
     )
 
 
@@ -64,7 +64,7 @@ class VerificationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: SecretStr = Field(
         min_length=43, max_length=43, title="이메일 인증 토큰",
-        description="필수. 빈칸에 수신한 메일 링크의 #token= 뒤에 있는 실제 43자 문자열만 입력. CSRF 토큰이나 링크 전체가 아닙니다.",
+        description="필수. 메일 링크의 #token= 뒤 43자 문자열.",
         examples=[""],
     )
 
@@ -146,7 +146,7 @@ def me(request: Request, conn=Depends(connection, scope="function")):
 
 @router.post("/login", dependencies=[Depends(require_csrf)], **ENDPOINTS["login"])
 def login(request: Request, response: Response,
-          payload: LoginInput = Body(description="필수 JSON 본문. 일반 로그인은 email·password만 입력하고 claim_contract_id는 생략하거나 null로 둡니다.",
+          payload: LoginInput = Body(description="이메일·비밀번호 필수. claim_contract_id는 선택.",
                                      openapi_examples={
                                          "login": {"summary": "일반 이메일 로그인", "value": {
                                              "email": "", "password": ""}},

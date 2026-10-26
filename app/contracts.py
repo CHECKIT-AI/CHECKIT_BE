@@ -13,9 +13,9 @@ router = APIRouter(prefix="/api/contracts", tags=["contracts"])
 @router.get("", **ENDPOINTS["list"])
 def list_contracts(request: Request,
                    limit: int = Query(default=20, ge=1, le=100, title="조회 개수",
-                                      description="선택. 한 번에 받을 기록 수. 정수 1~100, 기본 20.", examples=[20]),
+                                      description="조회 개수. 1~100, 기본 20.", examples=[20]),
                    offset: int = Query(default=0, ge=0, le=10000, title="건너뛸 개수",
-                                       description="선택. 앞에서 건너뛸 기록 수. 정수 0~10000, 기본 0. 다음 20개는 offset=20.", examples=[0]),
+                                       description="건너뛸 개수. 0~10000, 기본 0.", examples=[0]),
                    conn=Depends(connection, scope="function")):
     actor = current_actor(request, conn)
     predicate, owner_id = owner_predicate(actor)
@@ -30,7 +30,7 @@ def list_contracts(request: Request,
 @router.get("/{contract_id}", **ENDPOINTS["detail"])
 def detail(request: Request,
            contract_id: UUID = Path(title="조회할 계약서 ID",
-                                    description="필수 UUID. GET /api/contracts 응답의 contracts[].id에 있는 실제 본인 계약서 ID를 입력하세요. 아래 값은 형식 예시입니다.",
+                                    description="필수. 목록에서 얻은 실제 계약서 UUID.",
                                     examples=[UUID_EXAMPLE]),
            conn=Depends(connection, scope="function")):
     actor = current_actor(request, conn)
@@ -82,7 +82,7 @@ def detail(request: Request,
 @router.post("/{contract_id}/claim", dependencies=[Depends(require_csrf)], **ENDPOINTS["claim"])
 def claim(request: Request,
           contract_id: UUID = Path(title="회원 계정에 저장할 계약서 ID",
-                                   description="필수 UUID. 같은 브라우저에서 만든 유효한 비회원 완료 결과의 실제 계약서 ID. 현재 회원과 원래 비회원 쿠키가 함께 필요합니다.",
+                                   description="필수. 저장할 비회원 완료 결과의 계약서 UUID.",
                                    examples=[UUID_EXAMPLE]),
           conn=Depends(connection, scope="function")):
     names = cookie_names(request.app.state.settings)

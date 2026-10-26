@@ -1,0 +1,4 @@
+fastapi>=0.121,<1
+uvicorn>=0.34,<1
+psycopg[binary,pool]>=3.2,<4
+pydantic-settings>=2.7,<3

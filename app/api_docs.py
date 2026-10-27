@@ -10,6 +10,7 @@ TAGS = [
     {"name": "health", "description": "(상태확인) 서버·DB 연결 확인"},
     {"name": "auth", "description": "(인증) 가입·로그인·비회원 세션"},
     {"name": "contracts", "description": "(계약서) 내 기록 조회·회원 귀속"},
+    {"name": "rag", "description": "(법령검색) 로컬 Chroma 관련 조문 검색"},
 ]
 
 

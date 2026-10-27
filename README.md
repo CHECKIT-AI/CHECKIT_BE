@@ -64,6 +64,38 @@ py -3.13 -m venv .venv
 
 카카오·구글 키를 `.env`에 입력했다면 [소셜 로그인 테스트](http://localhost:8000/api/auth/oauth/test)에서 버튼으로 로그인할 수 있습니다. 프론트 완료 주소가 비어 있으면 개발용 완료 화면으로 돌아옵니다. **localhost로 접속하고 단일 서버 프로세스**로 테스트하세요. 자세한 내용은 [소셜 로그인 안내](docs/social-login-setup.md)에 있습니다.
 
+## 로컬 Chroma 검색 연결
+
+`CheckIt_BE`와 `CheckIt_Data`를 같은 상위 폴더에 준비합니다. 검색 로직·청크·인덱스는 Data에 두고 백엔드 프로세스 안에서 호출합니다. 별도 Data 서버는 필요 없습니다.
+
+백엔드 폴더에서 추가 패키지를 설치합니다. 모델 의존성 설치로 시간이 걸릴 수 있습니다.
+
+```bash
+.venv/bin/python -m pip install -r requirements-rag.txt
+```
+
+백엔드 `.env`에 추가하고 서버를 재시작합니다.
+
+```dotenv
+CHECKIT_RAG_ENABLED=true
+CHECKIT_RAG_CORPUS=labor_standards_v001
+CHECKIT_RAG_DEVICE=cpu
+```
+
+Data의 기존 `data/rag/processed/<corpus>/chunks.jsonl`과 `storage/rag/<corpus>/index_manifest.json`, `chroma/`가 필요합니다. Git 클론만으로는 이 데이터가 생기지 않습니다. 준비 방법은 Data README를 참고하세요. Data는 **editable 설치**로 연결하므로 설치 후 해당 폴더를 옮기지 않습니다.
+
+Swagger에서 CSRF 발급 → 비회원 세션 생성 → 응답의 최신 CSRF 토큰으로 `POST /api/rag/search`를 호출합니다. 회원 로그인 상태에서도 사용할 수 있습니다.
+
+```json
+{"query":"퇴사한 뒤 남은 월급은 언제까지 받아야 하나요?","top_k":5}
+```
+
+응답은 `corpus`, `method`, `results`이며 결과마다 조문 원문·메타데이터·cosine 거리를 반환합니다. 현재 기본 인덱스는 근로기준법이며 설명 생성·위법 판정은 포함하지 않습니다. 검색 문장은 저장하지 않습니다.
+
+첫 요청에 모델을 로딩하며 캐시에 없으면 다운로드가 필요합니다. **단일 worker**로 실행하고 발표 전에 한 번 검색해 준비하세요. 동시 검색은 `503 RAG_BUSY`, 세션당 분당 30회 초과는 `429`입니다. 일반 `/health/ready`는 DB만 확인하며 검색 준비 상태는 실제 검색으로 확인합니다.
+
+외부 테스트는 HTTPS 접속 주소와 접근 가능한 네트워크가 별도로 필요합니다. `127.0.0.1`은 외부에서 접속할 수 없습니다. 공개 HTTPS 환경에서는 production·보안 쿠키·명시적인 프론트 Origin 등 기존 인증 설정도 맞춰야 합니다. 이 변경 자체가 서버를 인터넷에 공개하지는 않습니다.
+
 ## 프론트 연동
 
 API 기본 주소는 `http://127.0.0.1:8000/api`입니다. 쿠키 전달을 위해 fetch에 `credentials: "include"`를 사용합니다.
@@ -78,8 +110,8 @@ CHECKIT_ALLOWED_ORIGINS=["http://127.0.0.1:8000","http://127.0.0.1:5173"]
 
 ## 구현 상태
 
-- **완료:** 이메일·카카오·구글 인증 API, 비회원 세션, 소유권·만료 검사, 기록 조회·회원 귀속
-- **예정:** 업로드, OCR·AI·Chroma 연결, 분석·취소·원본 다운로드·삭제, 비회원 자동 정리
+- **완료:** 이메일·카카오·구글 인증 API, 비회원 세션, 소유권·만료 검사, 기록 조회·회원 귀속, 로컬 Chroma 법령 검색 API(추가 설치·설정 필요)
+- **예정:** 업로드, OCR·AI 분석 파이프라인, 분석·취소·원본 다운로드·삭제, 비회원 자동 정리
 
 회원 기록은 직접 삭제 전까지, 비회원 기록은 최초 업로드 후 24시간 보관하는 정책입니다. 현재 만료 접근 차단은 구현됐으며 실제 자동 삭제는 구현 전입니다.
 
@@ -92,6 +124,7 @@ CheckIt_BE/
 │   ├── api_docs.py      # Swagger 설명
 │   ├── auth.py          # 회원·비회원 인증 API
 │   ├── contracts.py     # 기록 조회·회원 귀속 API
+│   ├── rag.py           # Data 패키지 연결·법령 검색 API
 │   ├── access.py        # 세션·CSRF·소유권 검사
 │   ├── security.py      # 해시·토큰·요청 제한
 │   ├── database.py      # DB 연결 풀

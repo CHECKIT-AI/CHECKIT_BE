@@ -17,6 +17,7 @@ from app.security import RateLimiter, hash_password, new_token
 from app.oauth import OAuthCallbackRedactionMiddleware, router as oauth_router
 from app.oauth_providers import ProviderClient
 from app.oauth_state import OAuthStateStore
+from app.rag import LocalSearch, router as rag_router
 
 
 def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
@@ -42,6 +43,7 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
                                                  "defaultModelsExpandDepth": 1,
                                                  "displayRequestDuration": True})
     application.state.settings = resolved
+    application.state.rag_search = LocalSearch(resolved)
     application.state.auth_limiter = RateLimiter()
     application.state.oauth_states = OAuthStateStore()
     application.state.oauth_client = ProviderClient()
@@ -53,7 +55,7 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
 
     @application.middleware("http")
     async def protect_auth_input(request, call_next):
-        if request.url.path.startswith("/api/auth/"):
+        if request.url.path.startswith(("/api/auth/", "/api/rag/")):
             if request.method == "POST":
                 body = bytearray()
                 async for chunk in request.stream():
@@ -89,6 +91,7 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
     application.include_router(auth_router)
     application.include_router(oauth_router)
     application.include_router(contracts_router)
+    application.include_router(rag_router)
 
     @application.get("/health/live", tags=["health"], **ENDPOINTS["live"])
     def live():

@@ -1,0 +1,7 @@
+-r requirements.txt
+# Install in editable mode: manifests/chunks/Chroma stay in the Data checkout.
+-e ../CheckIt_Data
+# Match the existing local index/model runtime; avoid implicit Chroma upgrades.
+chromadb==1.5.9
+sentence-transformers==5.7.0
+torch==2.14.1

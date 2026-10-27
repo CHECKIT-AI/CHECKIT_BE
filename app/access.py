@@ -9,7 +9,7 @@ from app.security import valid_token, token_hash, verify_csrf
 
 def cookie_names(settings):
     prefix = "__Host-" if settings.cookie_secure else ""
-    return {name: f"{prefix}checkit_{name}" for name in ("session", "guest", "csrf")}
+    return {name: f"{prefix}checkit_{name}" for name in ("session", "guest", "csrf", "oauth")}
 
 
 def connection(request: Request):

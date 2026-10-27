@@ -1,5 +1,20 @@
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from urllib.parse import urlsplit
+
+
+def valid_oauth_url(value, environment):
+    try:
+        url = urlsplit(value)
+        if url.username or url.password or not url.hostname or url.query or url.fragment:
+            return False
+        _ = url.port
+        return url.scheme == "https" or (
+            environment == "development" and url.scheme == "http"
+            and url.hostname in {"localhost", "127.0.0.1"}
+        )
+    except ValueError:
+        return False
 
 
 class Settings(BaseSettings):
@@ -20,6 +35,14 @@ class Settings(BaseSettings):
     smtp_password: SecretStr = SecretStr("")
     smtp_from: str = ""
     verification_page_url: str = ""
+    # Developer-console registration settings. OAuth routes are implemented separately.
+    kakao_rest_api_key: SecretStr = SecretStr("")
+    kakao_client_secret: SecretStr = SecretStr("")
+    kakao_redirect_uri: str = "http://localhost:8000/api/auth/oauth/kakao/callback"
+    google_client_id: SecretStr = SecretStr("")
+    google_client_secret: SecretStr = SecretStr("")
+    google_redirect_uri: str = "http://localhost:8000/api/auth/oauth/google/callback"
+    oauth_frontend_complete_url: str = ""
 
     @model_validator(mode="after")
     def validate_production(self):

@@ -49,6 +49,35 @@ def test_search_response_and_swagger():
         assert "200" in schema["paths"]["/api/rag/search"]["post"]["responses"]
 
 
+def test_clause_labels_and_original_text_are_forwarded_and_linked():
+    class ClauseService:
+        def search_clause(self, clause_id, text, labels, top_k):
+            assert (clause_id, text, labels, top_k) == ("c-7", "월급 2,500,000원은 공제하지 않는다.", ["임금"], 5)
+            return {"corpus": "employment_basic_v004", "method": "dense", "results": [],
+                    "clause_id": clause_id, "labels": labels, "retrieval_policy": "labels_soft_priority_v1"}
+
+    app = make_app()
+    app.state.rag_search.service = ClauseService()
+    with TestClient(app) as client:
+        response = client.post("/api/rag/search", json={"clause_id": "c-7", "labels": ["임금"],
+                               "text": "월급 2,500,000원은 공제하지 않는다."})
+        assert response.status_code == 200
+        assert response.json()["clause_id"] == "c-7"
+        assert response.json()["labels"] == ["임금"]
+        assert response.json()["retrieval_policy"] == "labels_soft_priority_v1"
+
+
+@pytest.mark.parametrize("patch", [
+    {"text": " "}, {"labels": []}, {"labels": ["임대차"]}, {"labels": ["임금", "임금"]},
+    {"clause_id": " "}, {"query": "혼합 입력"}, {"top_k": True}, {"text": "a" * 2001},
+])
+def test_invalid_clause_payload_is_rejected(patch):
+    payload = {"clause_id": "c-7", "labels": ["임금"], "text": "월급 지급"}
+    payload.update(patch)
+    with TestClient(make_app()) as client:
+        assert client.post("/api/rag/search", json=payload).status_code == 422
+
+
 @pytest.mark.parametrize("body", [
     {"query": " "}, {"query": "a" * 2001}, {"query": "test", "top_k": 11},
     {"query": "test", "top_k": True}, {"query": "test", "corpus": "../../private"},
@@ -135,6 +164,26 @@ def test_model_input_limit_is_422():
         response = client.post("/api/rag/search", json={"query": "test"})
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "RAG_INPUT_LIMIT"
+
+
+def test_reranked_keyword_candidate_and_year_warning_are_returned():
+    class Reranked:
+        def search(self, *_):
+            return {"corpus": "employment_basic_v003", "method": "hybrid_rerank", "results": [{
+                "rank": 1, "chunk_id": "keyword-only", "cosine_distance": None,
+                "reranker_score": 2.5, "content": "공식 원문", "metadata": {"article_id": "x"},
+            }], "warnings": ["2025년 고시 미수집"]}
+
+    app = make_app()
+    app.state.rag_search.service = Reranked()
+    with TestClient(app) as client:
+        response = client.post("/api/rag/search", json={"query": "2025년 최저임금"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["method"] == "hybrid_rerank"
+        assert body["results"][0]["cosine_distance"] is None
+        assert body["results"][0]["reranker_score"] == 2.5
+        assert body["warnings"] == ["2025년 고시 미수집"]
 
 
 def test_body_limit_and_rate_limit():

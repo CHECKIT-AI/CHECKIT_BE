@@ -114,13 +114,14 @@ FileInput: `file_id`, 서버 내부 `local_path`, 실제 검사한 `media_type`.
 | Clause / split_clauses | clause_id·text·상위 제목·block_id·page_id·원본 위치·수정 여부 |
 | ClassificationOutput | clause_id별 복수 labels, 라벨별 점수·임계값 버전·분류 모델 버전. 낮은 확신은 표시 |
 | Fact / extract_facts | 임금액·지급일·근무시간 등 field_code, 원문 값·파싱 값·단위·clause/block 근거·미확인 이유 |
-| LawSearchInput | query_text, label_hints, corpus_id, top_k. 검색 방법·모델은 서버 설정 |
+| LawSearchInput | 현재 API: clause_id, text, labels, top_k. corpus·검색 방법·모델은 서버 설정. query 형식은 이전 호환용 |
 | LawSearchOutput | hits 배열·검색 설정·버전·지원 범위 경고 |
 | CheckEvaluationInput | 원본 연결이 있는 조항·분류·세부 값·검색 근거·점검 규칙 버전 |
 
 - 라벨은 임금·근로시간·휴일·휴가·근무 장소 및 업무·계약기간·계약 종료·손해배상 및 위약금·기타 근로조건·그 외에 대응하는 안정 코드와 `labels.json` 버전을 사용합니다. 코드와 한국어 표시명·모델 출력 순서 매핑을 고정합니다.
 - 임금 라벨이 있다고 금액·지급일 등이 모두 채워진 것으로 취급하지 않습니다. 금액·시간 파싱에서는 실제 숫자를 학습용 가명 값으로 치환하지 않습니다.
-- label_hints는 검색 우선순위 신호입니다. 오분류로 관련 법령이 제외되지 않도록 fallback 검색을 둡니다. 현재 검색 코드에 라벨 필터가 이미 구현돼 있다고 가정하지 않습니다.
+- 현재 `LawSearchService.search_clause(clause_id, text, labels, top_k)`와 API 조항 입력을 구현했습니다. labels는 10개 한국어 이름을 사용하며 upstream 분류 모델의 `labels.json` 버전·순서와 이름 매핑은 별도로 고정해야 합니다.
+- 라벨은 전체 인덱스 상위 20개 후보에 적용하는 제한된 우선순위 신호입니다. 라벨로 근거를 제외하는 필터는 적용하지 않습니다. `그 외`도 원문으로 검색합니다. 원문 금액·시간·날짜를 보존합니다.
 
 ### LawHit와 현재 RAG 연결
 
@@ -128,7 +129,7 @@ LawHit 필드: `citation_id`, `rank`, `chunk_id`, `article_id`, `law_id`, `law_n
 
 - 현재 `LawRetriever.search(text, top_k)`는 `rank`, `chunk_id`, `content`, `metadata`, dense 방식이면 `cosine_distance`를 반환합니다. AI 패키지 어댑터에서 위 LawHit 규격으로 변환합니다.
 - `metadata.article_no` → article_number, metadata의 법령·조문 ID·출처·시행일 필드를 대응시킵니다. snapshot 시행일과 개별 조문 시행일을 구분하고 없으면 null로 보존합니다.
-- dense score_type은 COSINE_DISTANCE로 낮을수록 가깝습니다. 다른 검색 방법은 점수 종류를 구분하고 확률로 반환하지 않습니다.
+- `cosine_distance`는 낮을수록 가까운 원래 거리입니다. 라벨 입력에서는 `label_priority_score`로 순서를 정하며 높은 값이 앞에 옵니다. 어댑터는 LABEL_PRIORITY_SCORE와 원래 COSINE_DISTANCE를 구분하고 확률로 해석하지 않습니다. `base_rank`, `matched_labels`, 정책 버전도 보존합니다.
 - 모델 로드·인덱스 준비는 런타임 초기화 때 하고 매 함수 호출마다 재학습·인덱싱하지 않습니다. 현재 retriever는 last_candidates 등 상태를 변경하므로 동시 호출 시 인스턴스 공유 정책을 정해야 합니다.
 
 ### AnalysisOutput

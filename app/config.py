@@ -1,6 +1,7 @@
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from urllib.parse import urlsplit
+from typing import Literal
 
 
 def valid_oauth_url(value, environment):
@@ -44,8 +45,9 @@ class Settings(BaseSettings):
     google_redirect_uri: str = "http://localhost:8000/api/auth/oauth/google/callback"
     oauth_frontend_complete_url: str = ""
     rag_enabled: bool = False
-    rag_corpus: str = Field(default="employment_basic_v002", pattern=r"^[a-zA-Z0-9_-]+$")
+    rag_corpus: str = Field(default="employment_basic_v004", pattern=r"^[a-zA-Z0-9_-]+$")
     rag_device: str = "cpu"
+    rag_method: Literal["dense", "hybrid_rerank"] = "dense"
 
     @model_validator(mode="after")
     def validate_production(self):

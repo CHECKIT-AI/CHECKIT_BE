@@ -66,6 +66,8 @@ py -3.13 -m venv .venv
 
 ## 로컬 Chroma 검색 연결
 
+2026-10-28 기준 기본 검색 대상은 **`employment_basic_v002`(498청크)**입니다. Data의 BGE-M3 Chroma 인덱스를 사용하며, 백엔드 API의 검색 방식은 `dense`입니다. Data에 별도로 구축된 BM25는 이 API에서 사용하지 않습니다.
+
 **RAG(Chroma) 기능을 테스트하려면 백엔드 담당자에게 서버 실행 및 접속 주소를 요청하세요.** 전달받은 Cloudflare HTTPS 주소의 `/docs`에서 테스트할 수 있으며, 백엔드 클론이나 Chroma 설치는 필요 없습니다. 임시 주소는 변경될 수 있으므로 테스트 전에 최신 주소를 확인합니다.
 
 아래는 검색 환경을 직접 준비하는 경우의 설정입니다.
@@ -82,11 +84,11 @@ py -3.13 -m venv .venv
 
 ```dotenv
 CHECKIT_RAG_ENABLED=true
-CHECKIT_RAG_CORPUS=labor_standards_v001
+CHECKIT_RAG_CORPUS=employment_basic_v002
 CHECKIT_RAG_DEVICE=cpu
 ```
 
-Data의 기존 `data/rag/processed/<corpus>/chunks.jsonl`과 `storage/rag/<corpus>/index_manifest.json`, `chroma/`가 필요합니다. Git 클론만으로는 이 데이터가 생기지 않습니다. 준비 방법은 Data README를 참고하세요. Data는 **editable 설치**로 연결하므로 설치 후 해당 폴더를 옮기지 않습니다.
+Data의 `data/rag/processed/employment_basic_v002/chunks.jsonl`과 `storage/rag/<corpus>/index_manifest.json`, `chroma/`가 필요합니다. Git 클론만으로는 이 데이터가 생기지 않습니다. 현재 498개 corpus에는 기존 8개 법령 외에 시행규칙 3개·공휴일 규정·선택 별표 3개·고시가 필요합니다. 기본 법령 수집 명령만으로는 전체 구성이 생성되지 않습니다. 준비·재구축 방법은 [Data README](../CheckIt_Data/README.md)와 [원문 보완 기록](../CheckIt_Data/BASIC_LABOR_COVERAGE.md)을 참고하세요. Data는 **editable 설치**로 연결하므로 설치 후 해당 폴더를 옮기지 않습니다.
 
 Swagger에서 CSRF 발급 → 비회원 세션 생성 → 응답의 최신 CSRF 토큰으로 `POST /api/rag/search`를 호출합니다. 회원 로그인 상태에서도 사용할 수 있습니다.
 
@@ -94,11 +96,17 @@ Swagger에서 CSRF 발급 → 비회원 세션 생성 → 응답의 최신 CSRF 
 {"query":"퇴사한 뒤 남은 월급은 언제까지 받아야 하나요?","top_k":5}
 ```
 
-응답은 `corpus`, `method`, `results`이며 결과마다 조문 원문·메타데이터·cosine 거리를 반환합니다. 현재 기본 인덱스는 근로기준법이며 설명 생성·위법 판정은 포함하지 않습니다. 검색 문장은 저장하지 않습니다.
+응답은 `corpus`, `method`, `results`이며 결과마다 조문 원문·메타데이터·cosine 거리를 반환합니다. 현재 기본 인덱스는 근로관계 12개 법령·선택 별표 3개·2026년 최저임금 고시, 총 498개 청크입니다. 설명 생성·위법 판정은 포함하지 않습니다. 고시의 적용 기간은 2026년이며 검색 시 날짜 자동 필터는 없습니다. 검색 문장은 저장하지 않습니다. 고시·별표에는 자료 유형과 적용 기간 등 해당 자료에 있는 메타데이터도 반환합니다. 비밀유지·경업금지·사회보험·용역·파견·저작권에 대한 종합 판단까지 지원하는 것은 아닙니다.
 
 첫 요청에 모델을 로딩하며 캐시에 없으면 다운로드가 필요합니다. **단일 worker**로 실행하고 발표 전에 한 번 검색해 준비하세요. 동시 검색은 `503 RAG_BUSY`, 세션당 분당 30회 초과는 `429`입니다. 일반 `/health/ready`는 DB만 확인하며 검색 준비 상태는 실제 검색으로 확인합니다.
 
 외부 테스트는 HTTPS 접속 주소와 접근 가능한 네트워크가 별도로 필요합니다. `127.0.0.1`은 외부에서 접속할 수 없습니다. 공개 HTTPS 환경에서는 production·보안 쿠키·명시적인 프론트 Origin 등 기존 인증 설정도 맞춰야 합니다. 이 변경 자체가 서버를 인터넷에 공개하지는 않습니다.
+
+### 반영 확인 결과
+
+2026-10-28에 로컬 백엔드를 새 설정으로 실행해 DB 준비 상태와 실제 비회원 인증·CSRF를 포함한 검색 API 6건을 확인했습니다. 모두 200과 `corpus=employment_basic_v002`를 반환했고 고시·별표·추가 시행규칙이 검색됐습니다. 백엔드 RAG 테스트 12개와 Data 단위 테스트 15개가 통과했습니다. 이는 연결·동작 검증이며 새 인덱스의 전체 검색 정확도 평가는 아닙니다.
+
+기존 production HTTPS 보안 설정은 유지했습니다. 루프백 테스트에서는 쿠키 전달을 명시했으며 외부 HTTPS 터널 경로는 별도 검증하지 않았습니다. production·보안 쿠키 설정인 서버를 `http://127.0.0.1` Swagger에서 호출하면 인증에 실패할 수 있으므로 실제 브라우저 테스트는 허용된 HTTPS 주소에서 진행하세요.
 
 ## 프론트 연동
 

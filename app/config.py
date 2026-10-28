@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     google_redirect_uri: str = "http://localhost:8000/api/auth/oauth/google/callback"
     oauth_frontend_complete_url: str = ""
     rag_enabled: bool = False
-    rag_corpus: str = Field(default="labor_standards_v001", pattern=r"^[a-zA-Z0-9_-]+$")
+    rag_corpus: str = Field(default="employment_basic_v002", pattern=r"^[a-zA-Z0-9_-]+$")
     rag_device: str = "cpu"
 
     @model_validator(mode="after")

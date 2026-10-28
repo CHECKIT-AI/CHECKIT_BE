@@ -80,7 +80,8 @@ def search_actor(request: Request):
     "/search", response_model=SearchOutput, dependencies=[Depends(require_csrf)],
     summary="관련 법령 검색",
     description='회원 또는 비회원 세션과 CSRF 헤더 필요. 입력: {"query":"검색 문장","top_k":5}. '
-                '현재 근로기준법 검색만 지원합니다. 첫 요청은 모델 로딩으로 오래 걸릴 수 있습니다.',
+                '설정된 법령 인덱스를 검색합니다. 기본 인덱스는 근로관계 12개 법령·선택 별표·2026년 최저임금 고시입니다. '
+                '시행일·고시 적용 기간은 자동 필터링하지 않습니다. 첫 요청은 모델 로딩으로 오래 걸릴 수 있습니다.',
     responses={
         401: error_response("AUTHENTICATION_REQUIRED", "회원·비회원 세션 필요", "인증이 필요합니다.", "LOGIN"),
         403: error_response("CSRF_FAILED", "CSRF 토큰 또는 Origin 오류", "보안 토큰을 확인하세요."),

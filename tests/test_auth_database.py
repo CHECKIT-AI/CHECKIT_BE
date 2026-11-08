@@ -62,46 +62,38 @@ def db_case():
                              "VALUES (%s,%s,now()+interval '1 day')", (user_id, token_hash(token)))
                 users.append((user_id, email))
                 sessions.append(token)
-            raw_guest = new_token()
-            guest_id = conn.execute("INSERT INTO checkit.guest_sessions(token_hash) VALUES (%s) RETURNING id",
-                                    (token_hash(raw_guest),)).fetchone()["id"]
             contracts = []
-            for user_id, guest_owner, age, state in [
-                (users[0][0], None, 0, "AVAILABLE"), (users[1][0], None, 0, "AVAILABLE"),
-                (None, guest_id, 0, "AVAILABLE"), (None, guest_id, 25, "AVAILABLE"),
-                (None, guest_id, 0, "DELETING"),
+            for user_id, state in [
+                (users[0][0], "AVAILABLE"), (users[1][0], "AVAILABLE"),
+                (users[0][0], "DELETING"),
             ]:
                 contract_id = conn.execute(
-                    "INSERT INTO checkit.contracts(user_id,guest_session_id,contract_type,input_kind,first_uploaded_at,deletion_state) "
-                    "VALUES (%s,%s,'EMPLOYMENT','PDF',now()-%s*interval '1 hour',%s) RETURNING id",
-                    (user_id, guest_owner, age, state),
+                    "INSERT INTO checkit.contracts(user_id,contract_type,input_kind,first_uploaded_at,deletion_state) "
+                    "VALUES (%s,'EMPLOYMENT','PDF',now(),%s) RETURNING id",
+                    (user_id, state),
                 ).fetchone()["id"]
                 contracts.append(contract_id)
             settings = Settings(_env_file=None, database_url=configured.database_url,
                                 csrf_secret="test-only-secret-" * 3, allowed_origins=["http://testserver"])
             with TestClient(create_app(settings, TransactionPool(conn))) as client:
-                yield conn, client, users, sessions, raw_guest, contracts, password
+                yield conn, client, users, sessions, contracts, password
 
 
 def headers(client):
     return {"Origin": "http://testserver", "X-CSRF-Token": client.get("/api/auth/csrf").json()["csrf_token"]}
 
 
-def test_actual_owner_and_guest_expiry_queries(db_case):
-    conn, client, users, sessions, raw_guest, contracts, password = db_case
+def test_actual_owner_queries(db_case):
+    conn, client, users, sessions, contracts, password = db_case
     client.cookies.set("checkit_session", sessions[0])
     assert client.get(f"/api/contracts/{contracts[0]}").status_code == 200
     assert client.get(f"/api/contracts/{contracts[1]}").status_code == 404
     assert [row["id"] for row in client.get("/api/contracts").json()["contracts"]] == [str(contracts[0])]
-    client.cookies.clear()
-    client.cookies.set("checkit_guest", raw_guest)
-    assert client.get(f"/api/contracts/{contracts[2]}").status_code == 200
-    for index in (0, 1, 3, 4):
-        assert client.get(f"/api/contracts/{contracts[index]}").status_code == 404
+    assert client.get(f"/api/contracts/{contracts[2]}").status_code == 404
 
 
 def test_actual_login_revocation_and_expiry(db_case):
-    conn, client, users, sessions, raw_guest, contracts, password = db_case
+    conn, client, users, sessions, contracts, password = db_case
     response = client.post("/api/auth/login", headers=headers(client), json={
         "email": users[0][1], "password": password,
     })
@@ -120,30 +112,8 @@ def test_actual_login_revocation_and_expiry(db_case):
     assert client.get("/api/auth/me").status_code == 401
 
 
-def test_actual_claim_and_repeat_preserve_one_record(db_case):
-    conn, client, users, sessions, raw_guest, contracts, password = db_case
-    contract_id = contracts[2]
-    generation = conn.execute("INSERT INTO checkit.file_generations(contract_id,input_kind) "
-                              "VALUES (%s,'PDF') RETURNING id", (contract_id,)).fetchone()["id"]
-    revision = conn.execute("INSERT INTO checkit.text_revisions(contract_id,file_generation_id,revision,kind,content,confirmed_at) "
-                            "VALUES (%s,%s,1,'EXTRACTED','synthetic test text',now()) RETURNING id",
-                            (contract_id, generation)).fetchone()["id"]
-    job = conn.execute("INSERT INTO checkit.analysis_jobs(contract_id,request_id,kind,file_generation_id,input_revision_id,status,finished_at) "
-                       "VALUES (%s,%s,'ANALYSIS',%s,%s,'SUCCEEDED',now()) RETURNING id",
-                       (contract_id, uuid4(), generation, revision)).fetchone()["id"]
-    conn.execute("INSERT INTO checkit.analysis_results(contract_id,job_id,file_generation_id,input_revision_id,summary,corpus_version) "
-                 "VALUES (%s,%s,%s,%s,'synthetic summary','test-only')", (contract_id, job, generation, revision))
-    client.cookies.set("checkit_session", sessions[0])
-    client.cookies.set("checkit_guest", raw_guest)
-    for _ in range(2):
-        assert client.post(f"/api/contracts/{contract_id}/claim", headers=headers(client)).status_code == 200
-    row = conn.execute("SELECT user_id,guest_session_id,expires_at FROM checkit.contracts WHERE id=%s", (contract_id,)).fetchone()
-    assert row == {"user_id": users[0][0], "guest_session_id": None, "expires_at": None}
-    assert client.post(f"/api/contracts/{contracts[3]}/claim", headers=headers(client)).status_code == 404
-
-
 def test_actual_signup_verification_and_resend_with_mock_mail(db_case, monkeypatch):
-    conn, client, users, sessions, raw_guest, contracts, password = db_case
+    conn, client, users, sessions, contracts, password = db_case
     configured = client.app.state.settings
     configured.smtp_host = "smtp.example.invalid"
     configured.smtp_from = "sender@example.invalid"

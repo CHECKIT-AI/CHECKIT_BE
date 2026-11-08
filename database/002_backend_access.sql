@@ -5,7 +5,7 @@ DO $$
 DECLARE t text;
 BEGIN
     FOREACH t IN ARRAY ARRAY[
-        'users','auth_identities','auth_sessions','email_tokens','guest_sessions',
+        'users','auth_identities','auth_sessions','email_tokens',
         'contracts','file_generations','file_assets','document_pages',
         'text_revisions','analysis_jobs','analysis_results','check_items','law_citations'
     ] LOOP

@@ -94,29 +94,38 @@ def test_external_or_encoded_return_path_rejected(path):
         assert response.status_code == 422
 
 
+def test_removed_contract_claim_field_is_rejected():
+    with TestClient(create_app(configured(), Pool())) as client:
+        csrf = client.get("/api/auth/csrf").json()["csrf_token"]
+        response = client.post("/api/auth/oauth/google/start", json={
+            "return_path": "/", "claim_contract_id": str(uuid4()),
+        }, headers={"Origin": "http://testserver", "X-CSRF-Token": csrf})
+        assert response.status_code == 422
+
+
 def test_state_provider_browser_identity_and_replay():
     store = OAuthStateStore()
-    browser, member, guest = new_token(), new_token(), new_token()
-    state, context = store.create("google", browser, member, guest, "/", None)
-    for provider, b, m, g in [("kakao", browser, member, guest), ("google", new_token(), member, guest),
-                              ("google", browser, new_token(), guest), ("google", browser, member, "")]:
+    browser, member = new_token(), new_token()
+    state, context = store.create("google", browser, member, "/")
+    for provider, b, m in [("kakao", browser, member), ("google", new_token(), member),
+                           ("google", browser, new_token())]:
         with pytest.raises(APIError):
-            store.consume(state, provider, b, m, g)
-    assert store.consume(state, "google", browser, member, guest) == context
+            store.consume(state, provider, b, m)
+    assert store.consume(state, "google", browser, member) == context
     with pytest.raises(APIError):
-        store.consume(state, "google", browser, member, guest)
+        store.consume(state, "google", browser, member)
 
 
 def test_expired_state_and_store_capacity():
     store = OAuthStateStore(ttl=-1)
     browser = new_token()
-    state, _ = store.create("google", browser, "", "", "/", None)
+    state, _ = store.create("google", browser, "", "/")
     with pytest.raises(APIError):
-        store.consume(state, "google", browser, "", "")
+        store.consume(state, "google", browser, "")
     store = OAuthStateStore(capacity=1)
-    store.create("google", browser, "", "", "/", None)
+    store.create("google", browser, "", "/")
     with pytest.raises(APIError) as error:
-        store.create("google", browser, "", "", "/", None)
+        store.create("google", browser, "", "/")
     assert error.value.status == 429
 
 

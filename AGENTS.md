@@ -2,7 +2,7 @@
 
 **저장소 역할 및 기술 스택**
 
-CheckIt의 FastAPI 백엔드로 회원·비회원 인증, 이메일·소셜 로그인, 계약서 기록 조회·귀속, PostgreSQL 접근 및 선택적 법령 RAG 검색 API를 담당한다.
+CheckIt의 FastAPI 백엔드로 회원 인증, 이메일·소셜 로그인, 계약서 기록 조회, PostgreSQL 접근 및 선택적 법령 RAG 검색 API를 담당한다.
 
 - Python 3.13
 - FastAPI, Pydantic Settings, psycopg 3 connection pool
@@ -83,11 +83,11 @@ DB 통합 테스트는 강제 롤백 트랜잭션을 사용하지만 공유 DB�
 
 **데이터베이스 계약**
 
-기준 스키마는 checkit이며 14개 테이블로 구성된다.
+기준 스키마는 checkit이며 13개 테이블로 구성된다.
 
 **인증**
 
-- users, auth_identities, auth_sessions, email_tokens, guest_sessions
+- users, auth_identities, auth_sessions, email_tokens
 
 **계약서·파일**
 

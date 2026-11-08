@@ -1,14 +1,12 @@
 from typing import Literal
 from urllib.parse import parse_qs, urlencode, urlsplit
-from uuid import UUID
-
 from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 import psycopg
 from psycopg_pool import PoolTimeout
 
-from app.access import Actor, claim_contract, cookie_names, guest, require_csrf
+from app.access import Actor, cookie_names, require_csrf
 from app.auth import issue_csrf, set_cookie, throttle
 from app.config import valid_oauth_url
 from app.errors import APIError
@@ -22,7 +20,6 @@ Provider = Literal["kakao", "google"]
 class OAuthStartInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     return_path: str = Field(default="/", max_length=256, description="선택. 로그인 후 프론트 내부 이동 경로.")
-    claim_contract_id: UUID | None = Field(default=None, description="선택. 함께 저장할 비회원 완료 결과 UUID.")
 
     @field_validator("return_path")
     @classmethod
@@ -42,14 +39,12 @@ def completion_url(settings):
     return configured
 
 
-def finish(settings, *, error=None, context=None, claim=None):
+def finish(settings, *, error=None, context=None):
     parameters = {"oauth_status": "error" if error else "success"}
     if error:
         parameters["error_code"] = error
     if context:
         parameters["return_path"] = context.return_path
-    if claim is not None:
-        parameters["claim_status"] = "saved" if claim["saved"] else "failed"
     response = RedirectResponse(completion_url(settings) + "#" + urlencode(parameters), status_code=303)
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -64,7 +59,7 @@ def finish(settings, *, error=None, context=None, claim=None):
                         403: {"description": "CSRF 검증 실패"}, 429: {"description": "요청 제한"},
                         503: {"description": "키·시크릿·콜백·완료 화면 설정 필요"}})
 def start(provider: Provider, request: Request,
-          payload: OAuthStartInput = Body(examples=[{"return_path": "/", "claim_contract_id": None}])):
+          payload: OAuthStartInput = Body(examples=[{"return_path": "/"}])):
     throttle(request, "oauth-start")
     settings = request.app.state.settings
     provider_config(settings, provider)
@@ -73,7 +68,7 @@ def start(provider: Provider, request: Request,
     browser = new_token()
     state, context = request.app.state.oauth_states.create(
         provider, browser, request.cookies.get(names["session"], ""),
-        request.cookies.get(names["guest"], ""), payload.return_path, payload.claim_contract_id,
+        payload.return_path,
     )
     from fastapi.responses import JSONResponse
     response = JSONResponse({"authorization_url": authorization_url(settings, provider, state, context)})
@@ -106,7 +101,6 @@ def social_member(conn, provider, identity):
 def create_social_session(request, provider, identity, context):
     settings = request.app.state.settings
     names = cookie_names(settings)
-    claim = None
     with request.app.state.database_pool.connection() as conn:
         owner = social_member(conn, provider, identity)
         raw = new_token()
@@ -116,15 +110,8 @@ def create_social_session(request, provider, identity, context):
         conn.execute("INSERT INTO checkit.auth_sessions(user_id,token_hash,expires_at) "
                      "VALUES (%s,%s,now()+%s*interval '1 second')",
                      (owner.id, token_hash(raw), settings.session_seconds))
-        if context.claim_contract_id:
-            try:
-                with conn.transaction():
-                    visitor = guest(conn, request.cookies.get(names["guest"]))
-                    claim = claim_contract(conn, owner, visitor, context.claim_contract_id)
-            except APIError:
-                claim = {"saved": False}
     # Pool commits before success cookies are constructed.
-    response = finish(settings, context=context, claim=claim)
+    response = finish(settings, context=context)
     set_cookie(response, settings, "session", raw, settings.session_seconds)
     issue_csrf(request, response, member_token=raw)
     return response
@@ -154,7 +141,7 @@ def callback(provider: Provider, request: Request):
         state = query.get("state", [""])[0]
         context = request.app.state.oauth_states.consume(
             state, provider, request.cookies.get(names["oauth"], ""),
-            request.cookies.get(names["session"], ""), request.cookies.get(names["guest"], ""),
+            request.cookies.get(names["session"], ""),
         )
         consumed = True
         if "error" in query:
@@ -202,7 +189,7 @@ async function me(){const r=await fetch('/api/auth/me',{credentials:'include'});
 document.querySelectorAll('[data-provider]').forEach(b=>b.onclick=async()=>{try{
 const token=await csrf();const r=await fetch('/api/auth/oauth/'+b.dataset.provider+'/start',{
 method:'POST',credentials:'include',headers:{'Content-Type':'application/json','X-CSRF-Token':token},
-body:JSON.stringify({return_path:'/',claim_contract_id:null})});const d=await r.json();
+body:JSON.stringify({return_path:'/'})});const d=await r.json();
 if(!r.ok)throw Error(d.error?.message||'로그인 시작 실패');window.location.assign(d.authorization_url);
 }catch(e){out.textContent=e.message;}});
 document.getElementById('me').onclick=()=>me().catch(()=>out.textContent='연결 실패');

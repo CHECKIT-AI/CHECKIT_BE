@@ -2,8 +2,8 @@
 BEGIN;
 DO $$
 DECLARE
-    guest_id uuid; contract_id uuid; generation_id uuid;
-    member_id uuid; other_member_id uuid; deadline timestamptz;
+    contract_id uuid; generation_id uuid;
+    member_id uuid; other_member_id uuid;
 BEGIN
     INSERT INTO checkit.users(status) VALUES ('ACTIVE') RETURNING id INTO member_id;
     INSERT INTO checkit.users(status) VALUES ('ACTIVE') RETURNING id INTO other_member_id;
@@ -11,10 +11,8 @@ BEGIN
         VALUES (member_id, 'EMAIL', 'test@example.invalid', 'test@example.invalid', 'test-hash');
     INSERT INTO checkit.auth_identities(user_id, provider, provider_subject, email)
         VALUES (other_member_id, 'GOOGLE', 'test-google-subject', 'test@example.invalid');
-    INSERT INTO checkit.guest_sessions(token_hash) VALUES ('test-guest-hash') RETURNING id INTO guest_id;
-    INSERT INTO checkit.contracts(guest_session_id, contract_type, input_kind, first_uploaded_at)
-        VALUES (guest_id, 'EMPLOYMENT', 'PDF', now()) RETURNING id, expires_at INTO contract_id, deadline;
-    IF deadline <> now() + interval '24 hours' THEN RAISE EXCEPTION 'wrong retention'; END IF;
+    INSERT INTO checkit.contracts(user_id, contract_type, input_kind, first_uploaded_at)
+        VALUES (member_id, 'EMPLOYMENT', 'PDF', now()) RETURNING id INTO contract_id;
     BEGIN
         UPDATE checkit.contracts SET first_uploaded_at = now() + interval '1 hour' WHERE id = contract_id;
         RAISE EXCEPTION 'expected immutable first upload';
@@ -34,9 +32,10 @@ BEGIN
             VALUES (contract_id, generation_id, 'ORIGINAL', 'test/mixed.png', 'image/png', 1024);
         RAISE EXCEPTION 'expected mixed submission rejection';
     EXCEPTION WHEN check_violation THEN NULL; END;
-    UPDATE checkit.contracts SET user_id = member_id, guest_session_id = NULL WHERE id = contract_id;
-    IF EXISTS (SELECT 1 FROM checkit.contracts WHERE id = contract_id AND expires_at IS NOT NULL)
-        THEN RAISE EXCEPTION 'member retention failed'; END IF;
+    BEGIN
+        UPDATE checkit.contracts SET user_id = other_member_id WHERE id = contract_id;
+        RAISE EXCEPTION 'expected immutable owner';
+    EXCEPTION WHEN check_violation THEN NULL; END;
     SET CONSTRAINTS ALL IMMEDIATE;
 END;
 $$;

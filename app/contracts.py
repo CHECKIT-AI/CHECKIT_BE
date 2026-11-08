@@ -2,10 +2,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
-from app.access import (claim_contract, connection, cookie_names, current_actor,
-                        guest, member, owner_predicate, require_contract, require_csrf)
+from app.access import connection, current_actor, owner_predicate, require_contract
 from app.api_docs import ENDPOINTS, UUID_EXAMPLE
-from app.errors import APIError
 
 router = APIRouter(prefix="/api/contracts", tags=["contracts"])
 
@@ -20,7 +18,7 @@ def list_contracts(request: Request,
     actor = current_actor(request, conn)
     predicate, owner_id = owner_predicate(actor)
     rows = conn.execute(
-        "SELECT id,contract_type,input_kind,created_at,updated_at,expires_at "
+        "SELECT id,contract_type,input_kind,created_at,updated_at "
         f"FROM checkit.contracts WHERE deletion_state='AVAILABLE' AND ({predicate}) "
         "ORDER BY created_at DESC,id DESC LIMIT %s OFFSET %s", (owner_id, limit, offset),
     ).fetchall()
@@ -74,21 +72,6 @@ def detail(request: Request,
         result["citations"] = citations
         result["is_current_generation"] = result["file_generation_id"] == generation
         result["is_current_revision"] = bool(revision and result["input_revision_id"] == revision["id"])
-    # Recheck expiry/deletion after assembling text/results; long reads must not extend access.
+    # Recheck ownership/deletion after assembling text/results.
     require_contract(conn, actor, contract_id)
     return {"contract": contract, "files": files, "pages": pages, "text": revision, "current_result": result}
-
-
-@router.post("/{contract_id}/claim", dependencies=[Depends(require_csrf)], **ENDPOINTS["claim"])
-def claim(request: Request,
-          contract_id: UUID = Path(title="회원 계정에 저장할 계약서 ID",
-                                   description="필수. 저장할 비회원 완료 결과의 계약서 UUID.",
-                                   examples=[UUID_EXAMPLE]),
-          conn=Depends(connection, scope="function")):
-    names = cookie_names(request.app.state.settings)
-    owner = member(conn, request.cookies.get(names["session"]))
-    try:
-        visitor = guest(conn, request.cookies.get(names["guest"]))
-    except APIError:
-        visitor = None
-    return claim_contract(conn, owner, visitor, contract_id)

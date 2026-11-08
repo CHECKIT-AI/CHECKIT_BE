@@ -2,7 +2,9 @@
 
 FastAPI + Supabase PostgreSQL 기반 계약서 분석 백엔드입니다.
 
-## 최근 변경 요약 (2026-10-28)
+## 최근 변경 요약 (2026-11-08)
+
+- **회원 전용:** 계약서 조회와 RAG 검색은 유효한 회원 세션이 필요합니다. 임시 사용자 세션과 기록 귀속 API는 제공하지 않습니다.
 
 - **RAG 입력:** `POST /api/rag/search`가 `clause_id`, `labels`, `text`, `top_k`를 받아 분류 라벨과 조항 원문을 함께 검색합니다. 기존 `query` 입력도 유지합니다.
 - **검색 대상:** `employment_basic_v004`, **503청크**. 원문으로 전체 인덱스의 후보를 찾고 라벨로 작은 우선순위만 부여하며, 원문 금액·시간·날짜를 보존합니다.
@@ -65,14 +67,16 @@ py -3.13 -m venv .venv
 각 API에서 **Try it out → 입력 → Execute**를 누릅니다.
 
 1. `GET /api/auth/csrf` → `csrf_token` 복사
-2. `POST /api/auth/guest` → `X-CSRF-Token`에 붙여넣기, 본문 없음
-3. `GET /api/contracts` → 비회원 기록 목록 확인. 빈 배열도 정상
+2. `POST /api/auth/login` → 이메일·비밀번호와 `X-CSRF-Token` 전달
+3. `GET /api/contracts` → 회원 기록 목록 확인. 빈 배열도 정상
 
-모든 POST에는 CSRF 헤더가 필요합니다. 토큰은 10분 유효하며, 재발급·비회원 생성·로그인 후에는 최신 값을 사용합니다. 쿠키는 브라우저가 자동 전달합니다.
+모든 POST에는 CSRF 헤더가 필요합니다. 토큰은 10분 유효하며, 재발급·로그인 후에는 최신 값을 사용합니다. 쿠키는 브라우저가 자동 전달합니다.
 
 이메일 로그인은 인증 완료된 서비스 회원 계정이 필요합니다. 신규 가입 메일 발송에는 SMTP 설정이 필요하며, 미설정 시 `503 EMAIL_NOT_CONFIGURED`가 나옵니다.
 
 카카오·구글 키를 `.env`에 입력했다면 [소셜 로그인 테스트](http://localhost:8000/api/auth/oauth/test)에서 버튼으로 로그인할 수 있습니다. 프론트 완료 주소가 비어 있으면 개발용 완료 화면으로 돌아옵니다. **localhost로 접속하고 단일 서버 프로세스**로 테스트하세요. 자세한 내용은 [소셜 로그인 안내](docs/social-login-setup.md)에 있습니다.
+
+현재 구현된 회원 전용 요청·응답 형식은 [API 명세](docs/api-reference.md)를 참고하세요.
 
 ## 로컬 Chroma 검색 연결
 
@@ -101,7 +105,7 @@ CHECKIT_RAG_DEVICE=cpu
 
 Data의 `data/rag/processed/employment_basic_v004/chunks.jsonl`과 `storage/rag/<corpus>/index_manifest.json`, `chroma/`가 필요합니다. Git 클론만으로는 이 데이터가 생기지 않습니다. 현재 503개 corpus에는 기존 8개 법령 외에 시행규칙 3개·공휴일 규정·선택 별표 8개·고시가 필요합니다. 기본 법령 수집 명령만으로는 전체 구성이 생성되지 않습니다. 준비·재구축 방법은 [Data README](../CheckIt_Data/README.md)와 [원문 보완 기록](../CheckIt_Data/BASIC_LABOR_COVERAGE.md)을 참고하세요. Data는 **editable 설치**로 연결하므로 설치 후 해당 폴더를 옮기지 않습니다.
 
-Swagger에서 CSRF 발급 → 비회원 세션 생성 → 응답의 최신 CSRF 토큰으로 `POST /api/rag/search`를 호출합니다. 회원 로그인 상태에서도 사용할 수 있습니다.
+Swagger에서 CSRF 발급 → 회원 로그인 → 응답의 최신 CSRF 토큰으로 `POST /api/rag/search`를 호출합니다.
 
 ```json
 {
@@ -157,10 +161,10 @@ CHECKIT_ALLOWED_ORIGINS=["http://127.0.0.1:8000","http://127.0.0.1:5173"]
 
 ## 구현 상태
 
-- **완료:** 이메일·카카오·구글 인증 API, 비회원 세션, 소유권·만료 검사, 기록 조회·회원 귀속, 라벨+조항 원문을 받는 로컬 Chroma 법령 검색 API(추가 설치·설정 필요)
-- **예정:** 업로드, OCR·AI 분석 파이프라인, 분석·취소·원본 다운로드·삭제, 비회원 자동 정리
+- **완료:** 이메일·카카오·구글 인증 API, 회원 소유권 검사, 기록 조회, 라벨+조항 원문을 받는 로컬 Chroma 법령 검색 API(추가 설치·설정 필요)
+- **예정:** 업로드, OCR·AI 분석 파이프라인, 분석·취소·원본 다운로드·삭제
 
-회원 기록은 직접 삭제 전까지, 비회원 기록은 최초 업로드 후 24시간 보관하는 정책입니다. 현재 만료 접근 차단은 구현됐으며 실제 자동 삭제는 구현 전입니다.
+계약서 기능은 로그인한 회원만 사용할 수 있으며, 회원 기록은 직접 삭제할 때까지 보관합니다.
 
 ## 파일 구조
 
@@ -169,8 +173,8 @@ CheckIt_BE/
 ├── app/
 │   ├── main.py          # 서버·CORS·헬스 체크
 │   ├── api_docs.py      # Swagger 설명
-│   ├── auth.py          # 회원·비회원 인증 API
-│   ├── contracts.py     # 기록 조회·회원 귀속 API
+│   ├── auth.py          # 회원 인증 API
+│   ├── contracts.py     # 회원 기록 조회 API
 │   ├── rag.py           # Data 패키지 연결·법령 검색 API
 │   ├── access.py        # 세션·CSRF·소유권 검사
 │   ├── security.py      # 해시·토큰·요청 제한

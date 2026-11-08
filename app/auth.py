@@ -1,13 +1,11 @@
 import logging
 import re
 from threading import BoundedSemaphore
-from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-from app.access import (Actor, claim_contract, connection, cookie_names, guest,
-                        member, require_csrf)
+from app.access import Actor, connection, cookie_names, member, require_csrf
 from app.api_docs import ENDPOINTS
 from app.errors import APIError, unauthorized
 from app.mail import ensure_mail_config, send_verification
@@ -54,10 +52,7 @@ class SignupInput(Credentials):
 
 
 class LoginInput(Credentials):
-    claim_contract_id: UUID | None = Field(
-        default=None, title="함께 저장할 비회원 계약서 ID",
-        description="선택. 함께 저장할 비회원 계약서 UUID. 일반 로그인은 null.",
-    )
+    pass
 
 
 class VerificationInput(BaseModel):
@@ -91,14 +86,13 @@ def set_cookie(response, settings, name, value, max_age):
                         secure=settings.cookie_secure, httponly=True, samesite="lax", path="/")
 
 
-def issue_csrf(request, response, *, member_token=None, guest_token=None):
+def issue_csrf(request, response, *, member_token=None):
     settings = request.app.state.settings
     names = cookie_names(settings)
     context = new_token()
     set_cookie(response, settings, "csrf", context, 600)
     return sign_csrf(settings.csrf_secret.get_secret_value(), context,
-                     request.cookies.get(names["session"], "") if member_token is None else member_token,
-                     request.cookies.get(names["guest"], "") if guest_token is None else guest_token)
+                     request.cookies.get(names["session"], "") if member_token is None else member_token)
 
 
 def user_response(owner):
@@ -111,33 +105,6 @@ def csrf(request: Request, response: Response):
     return {"csrf_token": issue_csrf(request, response)}
 
 
-@router.post("/guest", dependencies=[Depends(require_csrf)], **ENDPOINTS["guest"])
-def create_guest(request: Request, response: Response, conn=Depends(connection, scope="function")):
-    throttle(request, "guest")
-    settings = request.app.state.settings
-    names = cookie_names(settings)
-    if request.cookies.get(names["session"]):
-        member(conn, request.cookies[names["session"]])
-        raise APIError(409, "ALREADY_AUTHENTICATED", "이미 회원으로 로그인되어 있습니다.")
-    old = request.cookies.get(names["guest"])
-    try:
-        visitor = guest(conn, old)
-        return {"kind": "GUEST", "guest_session_id": visitor.id,
-                "csrf_token": issue_csrf(request, response)}
-    except APIError as exc:
-        if exc.status != 401:
-            raise
-    raw = new_token()
-    visitor = conn.execute(
-        "INSERT INTO checkit.guest_sessions(token_hash) VALUES (%s) RETURNING id",
-        (token_hash(raw),),
-    ).fetchone()
-    # Browser access can persist; every contract still has its own fixed 24-hour deadline.
-    set_cookie(response, settings, "guest", raw, 30 * 86400)
-    return {"kind": "GUEST", "guest_session_id": visitor["id"],
-            "csrf_token": issue_csrf(request, response, guest_token=raw)}
-
-
 @router.get("/me", **ENDPOINTS["me"])
 def me(request: Request, conn=Depends(connection, scope="function")):
     owner = member(conn, request.cookies.get(cookie_names(request.app.state.settings)["session"]))
@@ -146,14 +113,8 @@ def me(request: Request, conn=Depends(connection, scope="function")):
 
 @router.post("/login", dependencies=[Depends(require_csrf)], **ENDPOINTS["login"])
 def login(request: Request, response: Response,
-          payload: LoginInput = Body(description="이메일·비밀번호 필수. claim_contract_id는 선택.",
-                                     openapi_examples={
-                                         "login": {"summary": "일반 이메일 로그인", "value": {
-                                             "email": "", "password": ""}},
-                                         "claim": {"summary": "로그인하며 비회원 완료 결과도 저장", "value": {
-                                             "email": "", "password": "",
-                                             "claim_contract_id": None}},
-                                     }), conn=Depends(connection, scope="function")):
+          payload: LoginInput = Body(description="이메일·비밀번호 필수."),
+          conn=Depends(connection, scope="function")):
     throttle(request, "login", payload.email)
     row = conn.execute(
         "SELECT i.user_id, i.password_hash, u.status FROM checkit.auth_identities i "
@@ -178,18 +139,8 @@ def login(request: Request, response: Response,
         "VALUES (%s,%s,now() + %s * interval '1 second')",
         (owner.id, token_hash(raw), settings.session_seconds),
     )
-    claim_result = None
-    if payload.claim_contract_id:
-        try:
-            with conn.transaction():
-                visitor = guest(conn, request.cookies.get(names["guest"]))
-                claim_result = claim_contract(conn, owner, visitor, payload.claim_contract_id)
-        except APIError:
-            # Claim failure must not undo successful login.
-            claim_result = {"saved": False, "code": "CONTRACT_NOT_FOUND"}
     set_cookie(response, settings, "session", raw, settings.session_seconds)
-    return {"user": user_response(owner), "csrf_token": issue_csrf(request, response, member_token=raw),
-            "claim_result": claim_result}
+    return {"user": user_response(owner), "csrf_token": issue_csrf(request, response, member_token=raw)}
 
 
 @router.post("/logout", status_code=204, dependencies=[Depends(require_csrf)], **ENDPOINTS["logout"])

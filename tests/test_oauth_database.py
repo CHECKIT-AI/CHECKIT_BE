@@ -13,7 +13,7 @@ pytestmark = pytest.mark.skipif(os.environ.get("CHECKIT_RUN_DB_TESTS") != "1",
 
 
 def test_social_signup_reuse_and_provider_separation(db_case):
-    conn, client, users, sessions, raw_guest, contracts, password = db_case
+    conn, client, users, sessions, contracts, password = db_case
     settings = client.app.state.settings
     settings.google_client_id = SecretStr("test-client")
     settings.google_client_secret = SecretStr("test-secret")

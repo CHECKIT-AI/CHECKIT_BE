@@ -30,7 +30,7 @@ def safe_error(exc, stage):
     elif isinstance(exc, (psycopg.ProgrammingError, ValueError)) and stage == "연결":
         reason = "연결 문자열 형식을 확인하세요. PostgreSQL URI와 비밀번호 URL 인코딩이 필요합니다."
     elif stage == "권한·RLS 설정":
-        reason = "권한·정책 설정에 실패했습니다. 테이블 14개의 존재·RLS 활성화·소유권을 확인하세요."
+        reason = "권한·정책 설정에 실패했습니다. 테이블 13개의 존재·RLS 활성화·소유권을 확인하세요."
     else:
         reason = "원인을 확정하지 못했습니다. 표시된 단계와 오류 코드로 추가 확인이 필요합니다."
     # SQLSTATE is exactly five ASCII alphanumeric characters, never arbitrary error data.
@@ -64,7 +64,7 @@ def main():
             stage = "권한·RLS 설정"
             conn.execute((Path(__file__).resolve().parents[1] / "database/002_backend_access.sql").read_text())
             stage = "트랜잭션 확정"
-        print("백엔드 계정·14개 테이블 권한·전용 RLS 정책 설정 완료")
+        print("백엔드 계정·13개 테이블 권한·전용 RLS 정책 설정 완료")
         return 0
     except Exception as exc:
         print(safe_error(exc, stage))

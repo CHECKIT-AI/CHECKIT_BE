@@ -39,18 +39,18 @@ def verify_password(password: str, encoded: str) -> bool:
         return False
 
 
-def csrf_binding(member: str, guest: str) -> str:
-    return token_hash(f"{len(member)}:{member}:{guest}")
+def csrf_binding(member: str) -> str:
+    return token_hash(member)
 
 
-def sign_csrf(secret: str, context: str, member: str, guest: str, now: int | None = None) -> str:
+def sign_csrf(secret: str, context: str, member: str, now: int | None = None) -> str:
     payload = f"{int(time.time()) if now is None else now}.{new_token()}"
     signature = hmac.new(secret.encode(),
-                         f"{context}.{csrf_binding(member, guest)}.{payload}".encode(), hashlib.sha256).hexdigest()
+                         f"{context}.{csrf_binding(member)}.{payload}".encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{signature}"
 
 
-def verify_csrf(secret: str, context: str, member: str, guest: str, token: str) -> bool:
+def verify_csrf(secret: str, context: str, member: str, token: str) -> bool:
     if not valid_token(context) or len(token) > 160:
         return False
     try:
@@ -59,7 +59,7 @@ def verify_csrf(secret: str, context: str, member: str, guest: str, token: str) 
         if age < 0 or age > 600 or not valid_token(nonce):
             return False
         expected = hmac.new(secret.encode(),
-                            f"{context}.{csrf_binding(member, guest)}.{timestamp}.{nonce}".encode(),
+                            f"{context}.{csrf_binding(member)}.{timestamp}.{nonce}".encode(),
                             hashlib.sha256).hexdigest()
         return hmac.compare_digest(signature, expected)
     except (ValueError, TypeError):

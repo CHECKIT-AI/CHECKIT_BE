@@ -3,13 +3,13 @@ from copy import deepcopy
 
 API_DESCRIPTION = """
 모든 POST는 `X-CSRF-Token`이 필요합니다. `GET /api/auth/csrf` 응답 값을 입력하세요.
-토큰은 10분 유효하며 재발급·비회원 세션 생성·로그인 후에는 최신 값을 사용하세요.
+토큰은 10분 유효하며 재발급·로그인 후에는 최신 값을 사용하세요.
 """
 
 TAGS = [
     {"name": "health", "description": "(상태확인) 서버·DB 연결 확인"},
-    {"name": "auth", "description": "(인증) 가입·로그인·비회원 세션"},
-    {"name": "contracts", "description": "(계약서) 내 기록 조회·회원 귀속"},
+    {"name": "auth", "description": "(인증) 가입·로그인"},
+    {"name": "contracts", "description": "(계약서) 내 기록 조회"},
     {"name": "rag", "description": "(법령검색) 로컬 Chroma 관련 조문 검색"},
 ]
 
@@ -27,7 +27,7 @@ def error_response(code, description, message, recovery="NONE", retryable=False)
 
 ERRORS = {
     400: error_response("INVALID_VERIFICATION_TOKEN", "이메일 인증 토큰이 잘못됐거나 만료·사용·폐기된 경우", "인증 링크가 만료됐거나 사용할 수 없습니다."),
-    401: error_response("AUTHENTICATION_REQUIRED", "회원/비회원 쿠키가 없거나 잘못됐거나 만료·폐기된 경우", "인증이 필요하거나 세션이 만료됐습니다.", "LOGIN"),
+    401: error_response("AUTHENTICATION_REQUIRED", "회원 쿠키가 없거나 잘못됐거나 만료·폐기된 경우", "인증이 필요하거나 세션이 만료됐습니다.", "LOGIN"),
     403: error_response("CSRF_FAILED", "CSRF 토큰 또는 Origin 검증 실패. CSRF를 다시 발급받고 확인하세요.", "보안 토큰을 새로 발급받고 다시 시도해 주세요."),
     404: error_response("CONTRACT_NOT_FOUND", "없는 계약서·타인 기록·만료·삭제 중 기록을 동일한 404로 처리", "접근 가능한 계약서를 찾을 수 없습니다."),
     413: error_response("REQUEST_TOO_LARGE", "인증 POST 본문이 16,384바이트를 초과한 경우", "요청 크기가 너무 큽니다."),
@@ -62,13 +62,6 @@ POST 요청에 사용할 보안 토큰을 발급합니다.
 
 입력 없음. 응답의 csrf_token을 X-CSRF-Token 헤더에 입력하세요.
 """, example={"csrf_token": "이 칸에는 실행할 때마다 실제 토큰이 발급됩니다"}, errors=(429,)),
-    "guest": docs('비회원 세션 생성', """
-비회원 세션을 생성하거나 기존 세션을 재사용합니다.
-
-입력: CSRF 헤더만 필요. 본문 없음.
-응답: 비회원 ID·새 csrf_token. 쿠키는 자동 저장됩니다.
-""", example={"kind": "GUEST", "guest_session_id": UUID_EXAMPLE, "csrf_token": "응답에서 발급된 새 토큰"},
-                  errors=(401, 403, 413, 422, 429, 503)),
     "signup": docs('이메일 회원가입', """
 가입과 인증 메일 발송을 접수합니다. SMTP 설정 필요.
 
@@ -103,16 +96,15 @@ POST 요청에 사용할 보안 토큰을 발급합니다.
 
 입력: CSRF 헤더 + 가입한 이메일·비밀번호.
 ```json
-{"email":"","password":"","claim_contract_id":null}
+{"email":"","password":""}
 ```
-claim_contract_id는 선택입니다. 비회원 결과도 저장하려면 실제 UUID를 입력하세요.
-응답: 회원 정보·새 csrf_token·claim_result. saved=false여도 로그인은 성공입니다.
-""", example={"user": USER_EXAMPLE, "csrf_token": "로그인 후 발급된 새 토큰", "claim_result": None},
+응답: 회원 정보·새 csrf_token.
+""", example={"user": USER_EXAMPLE, "csrf_token": "로그인 후 발급된 새 토큰"},
                   errors=(401, 403, 413, 422, 429, 503)),
     "me": docs('내 로그인 정보', """
 현재 회원의 ID·상태·가입 제공자를 조회합니다.
 
-입력 없음. 회원 쿠키 자동 전달. 미로그인/비회원은 401.
+입력 없음. 회원 쿠키 자동 전달. 미로그인은 401.
 """, example={"user": USER_EXAMPLE}, errors=(401, 503)),
     "logout": docs('로그아웃', """
 현재 회원 세션과 회원·CSRF 쿠키를 정리합니다. 계약서는 삭제하지 않습니다.
@@ -121,30 +113,21 @@ claim_contract_id는 선택입니다. 비회원 결과도 저장하려면 실제
 응답: 204, 본문 없음. 다음 POST 전 CSRF를 다시 발급하세요.
 """, success=204, errors=(403, 413, 422, 503), response_description="로그아웃/쿠키 정리 완료. 응답 본문 없음"),
     "list": docs('내 계약서 목록', """
-회원/비회원 본인의 유효한 기록을 최신순으로 조회합니다.
+회원 본인의 유효한 기록을 최신순으로 조회합니다.
 
 입력: limit(선택, 1~100, 기본 20), offset(선택, 0~10000, 기본 0).
-회원/비회원 쿠키 필요. 본문 없음. 응답은 contracts 배열이며 기록이 없으면 빈 배열입니다.
+회원 쿠키 필요. 본문 없음. 응답은 contracts 배열이며 기록이 없으면 빈 배열입니다.
 """, example={"contracts": [], "limit": 20, "offset": 0}, errors=(401, 422, 503)),
     "detail": docs('계약서 상세 조회', """
 본인 계약서의 파일 정보·페이지·텍스트·저장 결과를 조회합니다.
 
-입력: 목록에서 얻은 contract_id(UUID). 회원/비회원 쿠키 필요. 본문 없음.
+입력: 목록에서 얻은 contract_id(UUID). 회원 쿠키 필요. 본문 없음.
 응답: contract, files, pages, text, current_result. 없는 텍스트/결과는 null.
 is_current_generation/is_current_revision이 false면 이전 입력 기준 결과입니다.
 """, errors=(401, 404, 422, 503)),
-    "claim": docs('비회원 기록을 회원 계정에 저장', """
-비회원의 완료 결과를 현재 회원 계정에 귀속합니다.
-
-입력: contract_id(UUID) + CSRF 헤더. 본문 없음.
-회원 쿠키와 원래 비회원 쿠키가 필요하며, 최초 업로드 후 24시간 이내여야 합니다.
-응답: saved=true. 같은 회원의 중복 요청은 성공합니다.
-""", example={"contract_id": UUID_EXAMPLE, "saved": True}, errors=(401, 403, 404, 422, 503)),
 }
 
 # Route-specific error meanings that differ from the shared defaults.
-ENDPOINTS["guest"]["responses"][409] = error_response(
-    "ALREADY_AUTHENTICATED", "회원 로그인 상태에서 비회원 세션 생성을 요청한 경우", "이미 회원으로 로그인되어 있습니다.")
 ENDPOINTS["login"]["responses"][401] = error_response(
     "INVALID_CREDENTIALS", "이메일 또는 비밀번호가 일치하지 않는 경우", "이메일 또는 비밀번호를 확인하세요.")
 ENDPOINTS["login"]["responses"][403]["description"] += " 비밀번호는 맞지만 이메일 미인증이면 EMAIL_VERIFICATION_REQUIRED입니다."
@@ -164,7 +147,7 @@ ENDPOINTS["signup"]["responses"][422]["description"] += " 비밀번호가 12자 
 ENDPOINTS["detail"]["responses"][200]["content"] = {"application/json": {"example": {
     "contract": {
         "id": UUID_EXAMPLE, "contract_type": "EMPLOYMENT", "input_kind": "PDF",
-        "current_file_generation_id": None, "first_uploaded_at": None, "expires_at": None,
+        "current_file_generation_id": None, "first_uploaded_at": None,
         "created_at": "2026-10-26T00:00:00Z", "updated_at": "2026-10-26T00:00:00Z",
     },
     "files": [], "pages": [], "text": None, "current_result": None,

@@ -3,8 +3,6 @@ from dataclasses import dataclass, field
 import hmac
 from threading import Lock
 import time
-from uuid import UUID
-
 from app.errors import APIError
 from app.security import csrf_binding, new_token, token_hash, valid_token
 
@@ -18,7 +16,6 @@ class OAuthContext:
     nonce: str = field(repr=False)
     verifier: str = field(repr=False)
     return_path: str = "/"
-    claim_contract_id: UUID | None = None
 
 
 class OAuthStateStore:
@@ -27,19 +24,19 @@ class OAuthStateStore:
         self.entries = {}
         self.lock = Lock()
 
-    def create(self, provider, browser, member, guest, return_path, claim_contract_id):
+    def create(self, provider, browser, member, return_path):
         now = time.monotonic()
         with self.lock:
             self.entries = {key: value for key, value in self.entries.items() if value.expires_at > now}
             if len(self.entries) >= self.capacity:
                 raise APIError(429, "RATE_LIMITED", "잠시 후 다시 시도해 주세요.", retryable=True)
             state = new_token()
-            context = OAuthContext(provider, token_hash(browser), csrf_binding(member, guest),
-                                   now + self.ttl, new_token(), new_token(), return_path, claim_contract_id)
+            context = OAuthContext(provider, token_hash(browser), csrf_binding(member),
+                                   now + self.ttl, new_token(), new_token(), return_path)
             self.entries[token_hash(state)] = context
             return state, context
 
-    def consume(self, state, provider, browser, member, guest):
+    def consume(self, state, provider, browser, member):
         failure = APIError(400, "INVALID_OAUTH_STATE", "로그인 요청이 만료됐거나 브라우저가 일치하지 않습니다.")
         if not valid_token(state) or not valid_token(browser):
             raise failure
@@ -53,7 +50,7 @@ class OAuthStateStore:
                 raise failure
             if (context.provider != provider
                 or not hmac.compare_digest(context.browser_hash, token_hash(browser))
-                or not hmac.compare_digest(context.identity_binding, csrf_binding(member, guest))):
+                or not hmac.compare_digest(context.identity_binding, csrf_binding(member))):
                 raise failure
             del self.entries[key]
             return context

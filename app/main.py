@@ -125,9 +125,6 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
                         # Already required by require_csrf at runtime (missing -> 403).
                         # Mark it required in the UI without changing the existing error contract.
                         parameter["required"] = True
-        # FastAPI removes None values while building examples; keep the optional input visible.
-        login_examples = schema["paths"]["/api/auth/login"]["post"]["requestBody"]["content"]["application/json"]["examples"]
-        login_examples["claim"]["value"]["claim_contract_id"] = None
         return schema
 
     application.openapi = documented_openapi

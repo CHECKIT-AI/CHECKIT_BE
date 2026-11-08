@@ -30,7 +30,7 @@ Supabase의 Connect에서 직접 연결 또는 session pooler의 PostgreSQL 연�
 
 이 명령만 소유자 계정을 사용합니다. 새 `checkit_backend` 역할 생성과 `002_backend_access.sql` 적용은 한 트랜잭션입니다. 기존 역할이 있으면 변경 없이 중단합니다. 초기 스키마나 `checkit_reader`는 변경하지 않습니다. 기존 역할 검토 없이 비밀번호를 교체하지 않습니다.
 
-백엔드 역할은 checkit 14개 테이블의 SELECT/INSERT/UPDATE/DELETE만 사용하고, RLS는 유지합니다. 역할 전용 정책이 모든 행을 허용하므로 **사용자별 격리는 FastAPI가 인증·소유권·만료 조건으로 강제해야 합니다.** UUID나 클라이언트 user_id만으로 조회하는 공개 API를 만들면 안 됩니다. 이 단계는 공개 데이터 API를 제공하지 않습니다. 새 테이블에 권한이 자동 부여되지 않습니다.
+백엔드 역할은 checkit 13개 테이블의 SELECT/INSERT/UPDATE/DELETE만 사용하고, RLS는 유지합니다. 역할 전용 정책이 모든 행을 허용하므로 **사용자별 격리는 FastAPI가 인증·소유권 조건으로 강제해야 합니다.** UUID나 클라이언트 user_id만으로 조회하는 공개 API를 만들면 안 됩니다. 이 단계는 공개 데이터 API를 제공하지 않습니다. 새 테이블에 권한이 자동 부여되지 않습니다.
 
 ## 3. 전용 연결과 검증
 
@@ -43,7 +43,7 @@ Supabase의 Connect에서 직접 연결 또는 session pooler의 PostgreSQL 연�
 
 `GET /health/live`: 프로세스 응답. `GET /health/ready`: 전용 역할 확인 및 contracts SELECT 실행. DB 상세 오류는 응답하지 않습니다. 준비 상태 실패는 HTTP 503입니다. 연결 풀은 최대 5개이며 prepared statement를 비활성화했습니다.
 
-검증 스크립트는 기존 `verify_schema.sql`의 검증 본문을 전용 계정으로 실행하고 테스트 데이터를 항상 롤백합니다. 회원/비회원·파일 메타데이터 저장·조회, 24시간 만료, 회원 귀속 시 만료 해제, PDF 중복·형식 혼합 거부를 확인합니다. 실제 원본 파일이나 분석 결과 저장 검증을 대신하지 않습니다. `checkit_reader`의 실제 로그인 검증도 별도입니다.
+검증 스크립트는 기존 `verify_schema.sql`의 검증 본문을 전용 계정으로 실행하고 테스트 데이터를 항상 롤백합니다. 회원 소유권·파일 메타데이터 저장·조회, PDF 중복·형식 혼합 거부를 확인합니다. 실제 원본 파일이나 분석 결과 저장 검증을 대신하지 않습니다. `checkit_reader`의 실제 로그인 검증도 별도입니다.
 
 ```bash
 .venv/bin/python -m pytest -q
@@ -53,4 +53,4 @@ Supabase의 Connect에서 직접 연결 또는 session pooler의 PostgreSQL 연�
 
 사용자 실행으로 전용 계정 생성·DB 저장/조회 검증·FastAPI health/ready 200을 확인했습니다. 새 인증 코드의 로컬 테스트와 실제 DB 검증 범위는 인증 구현 안내를 참고하세요. 설치된 Starlette의 httpx TestClient 지원 중단 예정 경고가 있습니다.
 
-서버 파일 저장 및 업로드 검사 → AI 패키지 어댑터 → 분석·원본 다운로드·삭제 API 순서로 연결합니다. 파일 저장은 서버 폴더와 DB 저장 키 방식, 회원은 직접 삭제 전까지 보관, 비회원은 최초 업로드 후 24시간 정책을 유지합니다. 조회·귀속 API의 만료 차단은 구현했고 실제 자동 삭제 작업은 후속 구현입니다. 법령 RAG용 Chroma는 사용자 계약서 DB와 분리합니다.
+서버 파일 저장 및 업로드 검사 → AI 패키지 어댑터 → 분석·원본 다운로드·삭제 API 순서로 연결합니다. 파일 저장은 서버 폴더와 DB 저장 키 방식을 사용하고 회원 기록은 직접 삭제할 때까지 보관합니다. 법령 RAG용 Chroma는 사용자 계약서 DB와 분리합니다.

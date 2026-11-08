@@ -61,36 +61,17 @@ CREATE TABLE checkit.email_tokens (
     CHECK (expires_at > created_at)
 );
 
-CREATE TABLE checkit.guest_sessions (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    token_hash text NOT NULL UNIQUE CHECK (btrim(token_hash) <> ''),
-    revoked_at timestamptz,
-    last_seen_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
 CREATE TABLE checkit.contracts (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id uuid REFERENCES checkit.users(id),
-    guest_session_id uuid REFERENCES checkit.guest_sessions(id),
+    user_id uuid NOT NULL REFERENCES checkit.users(id),
     contract_type text NOT NULL CHECK (btrim(contract_type) <> ''),
     input_kind text NOT NULL CHECK (input_kind IN ('PDF', 'IMAGES')),
     current_file_generation_id uuid,
     first_uploaded_at timestamptz,
-    expires_at timestamptz,
     deletion_state text NOT NULL DEFAULT 'AVAILABLE'
         CHECK (deletion_state IN ('AVAILABLE', 'DELETING')),
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT one_contract_owner CHECK (num_nonnulls(user_id, guest_session_id) = 1),
-    CONSTRAINT contract_expiration CHECK (
-        (user_id IS NOT NULL AND expires_at IS NULL)
-        OR (guest_session_id IS NOT NULL AND (
-            (first_uploaded_at IS NULL AND expires_at IS NULL)
-            OR (first_uploaded_at IS NOT NULL AND expires_at IS NOT NULL
-                AND expires_at = first_uploaded_at + interval '24 hours')
-        ))
-    )
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- One submitted/reuploaded set of files. This replaces unvalidated generation IDs.
@@ -250,9 +231,6 @@ CREATE TABLE checkit.law_citations (
 
 CREATE INDEX contracts_member_list ON checkit.contracts(user_id, created_at DESC)
     WHERE user_id IS NOT NULL;
-CREATE INDEX contracts_guest_list ON checkit.contracts(guest_session_id, created_at DESC)
-    WHERE guest_session_id IS NOT NULL;
-CREATE INDEX contracts_expiry ON checkit.contracts(expires_at) WHERE expires_at IS NOT NULL;
 CREATE INDEX sessions_by_user ON checkit.auth_sessions(user_id);
 CREATE INDEX email_tokens_by_user ON checkit.email_tokens(user_id);
 CREATE INDEX files_by_generation ON checkit.file_assets(generation_id);
@@ -268,8 +246,8 @@ LANGUAGE plpgsql SET search_path = pg_catalog AS $$
 BEGIN NEW.updated_at := now(); RETURN NEW; END;
 $$;
 
--- Preserve the first upload's deadline across retries, cancellation and reuploads.
-CREATE FUNCTION checkit.enforce_contract_retention() RETURNS trigger
+-- Contract ownership and the first upload timestamp cannot be reassigned.
+CREATE FUNCTION checkit.enforce_contract_owner() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog AS $$
 BEGIN
     IF TG_OP = 'UPDATE' THEN
@@ -277,34 +255,18 @@ BEGIN
            AND NEW.first_uploaded_at IS DISTINCT FROM OLD.first_uploaded_at THEN
             RAISE EXCEPTION 'first_uploaded_at is immutable' USING ERRCODE = '23514';
         END IF;
-        IF OLD.user_id IS NOT NULL AND NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+        IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
             RAISE EXCEPTION 'member ownership cannot be reassigned' USING ERRCODE = '23514';
         END IF;
-        IF OLD.guest_session_id IS NOT NULL AND NEW.user_id IS NULL
-           AND NEW.guest_session_id IS DISTINCT FROM OLD.guest_session_id THEN
-            RAISE EXCEPTION 'guest ownership cannot be reassigned' USING ERRCODE = '23514';
-        END IF;
-        IF OLD.guest_session_id IS NOT NULL AND NEW.user_id IS NOT NULL
-           AND (OLD.deletion_state <> 'AVAILABLE' OR OLD.expires_at <= now()) THEN
-            RAISE EXCEPTION 'expired/deleting guest contract cannot be claimed'
-                USING ERRCODE = '23514';
-        END IF;
     END IF;
-    IF NEW.user_id IS NOT NULL THEN
-        IF NOT EXISTS (SELECT 1 FROM checkit.users WHERE id = NEW.user_id AND status = 'ACTIVE') THEN
-            RAISE EXCEPTION 'contract owner must be active' USING ERRCODE = '23514';
-        END IF;
-        NEW.expires_at := NULL;
-    ELSIF NEW.first_uploaded_at IS NOT NULL THEN
-        NEW.expires_at := NEW.first_uploaded_at + interval '24 hours';
-    ELSE
-        NEW.expires_at := NULL;
+    IF NOT EXISTS (SELECT 1 FROM checkit.users WHERE id = NEW.user_id AND status = 'ACTIVE') THEN
+        RAISE EXCEPTION 'contract owner must be active' USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
 END;
 $$;
-CREATE TRIGGER enforce_contract_retention BEFORE INSERT OR UPDATE ON checkit.contracts
-    FOR EACH ROW EXECUTE FUNCTION checkit.enforce_contract_retention();
+CREATE TRIGGER enforce_contract_owner BEFORE INSERT OR UPDATE ON checkit.contracts
+    FOR EACH ROW EXECUTE FUNCTION checkit.enforce_contract_owner();
 
 -- Serialize original-file count/total-size checks within one upload generation.
 CREATE FUNCTION checkit.validate_original_file() RETURNS trigger
@@ -349,7 +311,7 @@ BEGIN
             'FOR EACH ROW EXECUTE FUNCTION checkit.touch_updated_at()', table_name);
     END LOOP;
     FOREACH table_name IN ARRAY ARRAY[
-        'users', 'auth_identities', 'auth_sessions', 'email_tokens', 'guest_sessions',
+        'users', 'auth_identities', 'auth_sessions', 'email_tokens',
         'contracts', 'file_generations', 'file_assets', 'document_pages',
         'text_revisions', 'analysis_jobs', 'analysis_results', 'check_items', 'law_citations'
     ] LOOP
@@ -365,8 +327,7 @@ COMMENT ON TABLE checkit.users IS '제공자별 독립 회원 계정';
 COMMENT ON TABLE checkit.auth_identities IS '계정당 로그인 수단 한 개. 계정 연결 기능 없음';
 COMMENT ON TABLE checkit.auth_sessions IS '회원 로그인 세션. 비밀값은 해시로 저장';
 COMMENT ON TABLE checkit.email_tokens IS '이메일 가입 인증 전용. 비밀번호 재설정 제외';
-COMMENT ON TABLE checkit.guest_sessions IS '비회원 브라우저 접근 식별';
-COMMENT ON TABLE checkit.contracts IS '계약서 소유권·종류·첫 업로드 후 24시간 보관 정책';
+COMMENT ON TABLE checkit.contracts IS '회원 소유 계약서와 종류';
 COMMENT ON TABLE checkit.file_generations IS '최초 제출·전체 재업로드별 파일 묶음';
 COMMENT ON TABLE checkit.file_assets IS '서버 폴더 파일의 저장 키·형식·용량';
 COMMENT ON TABLE checkit.document_pages IS 'PDF 또는 사진의 페이지 순서·원본 연결';
@@ -378,6 +339,6 @@ COMMENT ON TABLE checkit.law_citations IS '실제 인용한 법령 원문·버�
 
 COMMIT;
 
--- Expected: 14 rows, all with row_security = true.
+-- Expected: 13 rows, all with row_security = true.
 SELECT tablename, rowsecurity AS row_security
 FROM pg_tables WHERE schemaname = 'checkit' ORDER BY tablename;

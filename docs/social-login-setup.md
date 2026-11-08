@@ -91,18 +91,18 @@ CHECKIT_OAUTH_FRONTEND_COMPLETE_URL=
 
 | 메서드 | 경로 | 입력 | 응답 |
 | --- | --- | --- | --- |
-| POST | `/api/auth/oauth/{provider}/start` | provider=kakao/google, CSRF 헤더, `{ "return_path": "/", "claim_contract_id": null }` | `{ "authorization_url": "..." }` |
+| POST | `/api/auth/oauth/{provider}/start` | provider=kakao/google, CSRF 헤더, `{ "return_path": "/" }` | `{ "authorization_url": "..." }` |
 | GET | `/api/auth/oauth/{provider}/callback` | 제공자가 전달하는 code/state 또는 error | 완료 화면으로 303 이동 |
 
-프론트는 start 응답의 authorization_url로 **브라우저를 이동**합니다. 콜백을 직접 fetch하지 않습니다. 완료 화면은 fragment의 oauth_status=success/error, error_code, 선택적인 claim_status=saved/failed와 return_path를 읽고 주소에서 제거합니다. 원시 OAuth 코드·제공자 토큰·세션 토큰은 완료 URL에 넣지 않습니다.
+프론트는 start 응답의 authorization_url로 **브라우저를 이동**합니다. 콜백을 직접 fetch하지 않습니다. 완료 화면은 fragment의 oauth_status=success/error, error_code와 return_path를 읽고 주소에서 제거합니다. 원시 OAuth 코드·제공자 토큰·세션 토큰은 완료 URL에 넣지 않습니다.
 
-성공 후 GET /api/auth/me로 회원 정보, GET /api/auth/csrf로 새 CSRF를 받습니다. return_path는 내부 상대 경로만 허용하며 실제 프론트 이동은 프론트에서 처리합니다. claim_contract_id로 선택한 비회원 완료 결과만 귀속하고, 저장에 실패해도 로그인 성공은 유지합니다.
+성공 후 GET /api/auth/me로 회원 정보, GET /api/auth/csrf로 새 CSRF를 받습니다. return_path는 내부 상대 경로만 허용하며 실제 프론트 이동은 프론트에서 처리합니다.
 
 구글은 PKCE(S256)와 서명·issuer·audience·발급/만료 시각·nonce·azp를 검증합니다. 카카오는 인가 코드를 액세스 토큰으로 교환하고 공식 사용자 정보 API에서 고유 ID를 확인합니다. 이메일이 같아도 EMAIL/KAKAO/GOOGLE 계정은 별도입니다. 제공자 액세스/리프레시 토큰은 DB에 보관하지 않습니다.
 
 ## 6. 현재 실행 조건
 
-OAuth state는 서버 메모리의 한정된 저장소에 10분 보관하고 브라우저·제공자·현재 로그인/비회원 쿠키에 결합합니다. 콜백에서 한 번만 소비합니다. 새 로그인을 시작하면 이전 브라우저 OAuth 쿠키를 교체하므로 여러 로그인 창을 동시에 진행하지 마세요.
+OAuth state는 서버 메모리의 한정된 저장소에 10분 보관하고 브라우저·제공자·현재 로그인 쿠키에 결합합니다. 콜백에서 한 번만 소비합니다. 새 로그인을 시작하면 이전 브라우저 OAuth 쿠키를 교체하므로 여러 로그인 창을 동시에 진행하지 마세요.
 
 **현재는 단일 프로세스 실행 기준입니다.** worker 여러 개·여러 서버를 쓰기 전에는 DB/Redis 등 공유 OAuth 컨텍스트 저장소가 필요합니다. 서버 재시작·리로드 시 진행 중 로그인은 다시 시작해야 합니다. 로그인 완료 세션은 DB에 보관하므로 별도 만료 정책을 따릅니다. 운영에서는 고정 HTTPS 완료 주소 설정이 필요합니다.
 

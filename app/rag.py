@@ -119,7 +119,7 @@ def search_actor(request: Request):
 @router.post(
     "/search", response_model=SearchOutput, dependencies=[Depends(require_csrf)],
     summary="관련 법령 검색",
-    description='회원 또는 비회원 세션과 CSRF 헤더 필요. 기본 입력: '
+    description='회원 세션과 CSRF 헤더 필요. 기본 입력: '
                 '{"clause_id":"clause_007","labels":["임금"],"text":"해당 조항 원문","top_k":5}. '
                 '라벨은 작은 우선순위 신호이며 검색 범위를 차단하지 않습니다. '
                 '기존 {"query":"검색 문장","top_k":5} 형식도 지원합니다. 두 형식을 섞을 수 없습니다. '
@@ -127,7 +127,7 @@ def search_actor(request: Request):
                 '명시한 연도와 연간 고시 기간을 대조하며, 일반 법령의 과거 버전은 자동 복원하지 않습니다. '
                 '첫 요청은 모델 로딩으로 오래 걸릴 수 있습니다.',
     responses={
-        401: error_response("AUTHENTICATION_REQUIRED", "회원·비회원 세션 필요", "인증이 필요합니다.", "LOGIN"),
+        401: error_response("AUTHENTICATION_REQUIRED", "회원 세션 필요", "인증이 필요합니다.", "LOGIN"),
         403: error_response("CSRF_FAILED", "CSRF 토큰 또는 Origin 오류", "보안 토큰을 확인하세요."),
         413: error_response("REQUEST_TOO_LARGE", "본문 16,384바이트 초과", "요청 크기가 너무 큽니다."),
         422: error_response("INVALID_INPUT", "입력 형식·길이·top_k 범위·모델 입력 제한 오류", "입력 형식을 확인하세요."),

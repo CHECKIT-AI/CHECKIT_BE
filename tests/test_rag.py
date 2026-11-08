@@ -23,7 +23,7 @@ class Pool:
 def make_app():
     app = create_app(Settings(_env_file=None, rag_enabled=True), pool=Pool())
     app.dependency_overrides[require_csrf] = lambda: None
-    app.dependency_overrides[search_actor] = lambda: SimpleNamespace(kind="GUEST", id="test")
+    app.dependency_overrides[search_actor] = lambda: SimpleNamespace(kind="MEMBER", id="test")
     return app
 
 

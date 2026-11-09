@@ -155,6 +155,8 @@ CREATE TABLE checkit.analysis_jobs (
     kind text NOT NULL CHECK (kind IN ('EXTRACTION', 'ANALYSIS')),
     file_generation_id uuid NOT NULL,
     input_revision_id uuid,
+    analysis_context jsonb NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(analysis_context) = 'object'),
     status text NOT NULL DEFAULT 'QUEUED' CHECK (status IN (
         'QUEUED', 'RUNNING', 'CANCEL_REQUESTED', 'CANCELLED', 'SUCCEEDED', 'FAILED'
     )),
@@ -210,6 +212,8 @@ CREATE TABLE checkit.check_items (
         CHECK (jsonb_typeof(required_information) = 'array'),
     source_locations jsonb NOT NULL DEFAULT '[]'::jsonb
         CHECK (jsonb_typeof(source_locations) = 'array'),
+    rule_candidate jsonb NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(rule_candidate) = 'object'),
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -332,7 +336,7 @@ COMMENT ON TABLE checkit.file_generations IS '최초 제출·전체 재업로드
 COMMENT ON TABLE checkit.file_assets IS '서버 폴더 파일의 저장 키·형식·용량';
 COMMENT ON TABLE checkit.document_pages IS 'PDF 또는 사진의 페이지 순서·원본 연결';
 COMMENT ON TABLE checkit.text_revisions IS 'OCR 원문 및 사용자 수정본의 내부 입력 버전';
-COMMENT ON TABLE checkit.analysis_jobs IS '요청 실행·취소·오류 추적. 별도 상태 조회 API를 뜻하지 않음';
+COMMENT ON TABLE checkit.analysis_jobs IS '요청 실행·오류 추적 및 분석 상태 조회';
 COMMENT ON TABLE checkit.analysis_results IS '계약서별 현재 분석 결과 한 건';
 COMMENT ON TABLE checkit.check_items IS '리포트 점검 항목·설명·원본 위치';
 COMMENT ON TABLE checkit.law_citations IS '실제 인용한 법령 원문·버전·출처 스냅샷';

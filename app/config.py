@@ -48,6 +48,20 @@ class Settings(BaseSettings):
     rag_corpus: str = Field(default="employment_basic_v004", pattern=r"^[a-zA-Z0-9_-]+$")
     rag_device: str = "cpu"
     rag_method: Literal["dense", "hybrid_rerank"] = "dense"
+    classifier_enabled: bool = False
+    classifier_model_id: str = Field(
+        default="rladmsgki/checkit-contract-classifier",
+        pattern=r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$",
+    )
+    classifier_revision: str = Field(
+        default="aedfc58fa73fe5bc58a4e66a0cadaeef091fe59e",
+        pattern=r"^[0-9a-f]{40}$",
+    )
+    classifier_device: Literal["auto", "cpu", "cuda", "mps"] = "cpu"
+    classifier_max_length: int = Field(default=256, ge=1, le=512)
+    gemini_api_key: SecretStr = SecretStr("")
+    gemini_model: str = Field(default="gemini-3.8-flash", pattern=r"^gemini-[a-zA-Z0-9.-]+$")
+    gemini_timeout_seconds: int = Field(default=60, ge=5, le=180)
 
     @model_validator(mode="after")
     def validate_production(self):

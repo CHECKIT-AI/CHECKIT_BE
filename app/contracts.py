@@ -56,7 +56,7 @@ def detail(request: Request,
     ).fetchone()
     if result:
         result["items"] = conn.execute(
-            "SELECT id,check_code,labels,status,quoted_text,explanation,required_information,source_locations "
+            "SELECT id,check_code,labels,status,quoted_text,explanation,required_information,source_locations,rule_candidate "
             "FROM checkit.check_items WHERE result_id=%s ORDER BY created_at,id", (result["id"],),
         ).fetchall()
         counts = {status: 0 for status in ("CAUTION", "MISSING_SUSPECTED", "NEEDS_CONFIRMATION", "PRESENT")}

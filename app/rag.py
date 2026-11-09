@@ -6,13 +6,12 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.access import current_actor, require_csrf
+from app.ai_contracts import ClauseLabel
 from app.api_docs import error_response
+from app.classifier import ClassificationOutput
 from app.errors import APIError
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
-
-ClauseLabel = Literal["임금", "근로시간", "휴일", "휴가", "근무 장소·업무", "계약기간", "계약 종료",
-                      "손해배상·위약금", "기타 근로조건", "그 외"]
 
 
 class SearchInput(BaseModel):
@@ -31,7 +30,7 @@ class SearchInput(BaseModel):
 class ClauseSearchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     clause_id: str = Field(min_length=1, max_length=128, description="원본 조항과 연결할 ID")
-    labels: list[ClauseLabel] = Field(min_length=1, max_length=10, description="분류 모델의 복수 라벨. 법률 판정 결과가 아닙니다.")
+    labels: list[ClauseLabel] = Field(max_length=10, description="분류 모델의 복수 라벨. 빈 배열을 허용하며 법률 판정 결과가 아닙니다.")
     text: str = Field(min_length=1, max_length=2000, description="해당 조항 원문. 실제 금액·시간·날짜를 보존합니다.")
     top_k: int = Field(default=5, ge=1, le=10, strict=True)
 
@@ -48,6 +47,20 @@ class ClauseSearchInput(BaseModel):
         if len(value) != len(set(value)):
             raise ValueError("중복된 라벨입니다.")
         return value
+
+
+class ModelClauseSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    clause_id: str = Field(min_length=1, max_length=128, description="원본 조항과 연결할 ID")
+    text: str = Field(min_length=1, max_length=2000, description="분류하고 검색할 계약 조항 원문")
+    top_k: int = Field(default=5, ge=1, le=10, strict=True)
+
+    @field_validator("clause_id", "text")
+    @classmethod
+    def strip_nonempty(cls, value):
+        if not value.strip():
+            raise ValueError("조항 ID와 원문을 입력하세요.")
+        return value.strip()
 
 
 class SearchHit(BaseModel):
@@ -70,6 +83,7 @@ class SearchOutput(BaseModel):
     clause_id: str | None = None
     labels: list[ClauseLabel] = Field(default_factory=list)
     retrieval_policy: Literal["labels_soft_priority_v1"] | None = None
+    classification: ClassificationOutput | None = None
 
 
 class LocalSearch:
@@ -121,6 +135,7 @@ def search_actor(request: Request):
     summary="관련 법령 검색",
     description='회원 세션과 CSRF 헤더 필요. 기본 입력: '
                 '{"clause_id":"clause_007","labels":["임금"],"text":"해당 조항 원문","top_k":5}. '
+                'labels를 생략하면 설정된 분류 모델로 먼저 분류한 뒤 검색합니다. '
                 '라벨은 작은 우선순위 신호이며 검색 범위를 차단하지 않습니다. '
                 '기존 {"query":"검색 문장","top_k":5} 형식도 지원합니다. 두 형식을 섞을 수 없습니다. '
                 '설정된 법령 인덱스를 검색합니다. 기본 인덱스는 근로관계 12개 법령·선택 별표·2026년 최저임금 고시입니다. '
@@ -132,11 +147,18 @@ def search_actor(request: Request):
         413: error_response("REQUEST_TOO_LARGE", "본문 16,384바이트 초과", "요청 크기가 너무 큽니다."),
         422: error_response("INVALID_INPUT", "입력 형식·길이·top_k 범위·모델 입력 제한 오류", "입력 형식을 확인하세요."),
         429: error_response("RATE_LIMITED", "세션당 분당 30회 초과", "잠시 후 다시 시도하세요.", retryable=True),
-        503: error_response("RAG_UNAVAILABLE", "검색 비활성화·준비 실패·동시 처리 중 또는 DB 연결 실패", "검색 준비 상태를 확인하세요."),
+        503: error_response("RAG_UNAVAILABLE", "검색·분류 비활성화, 준비 실패, 동시 처리 중 또는 DB 연결 실패", "검색과 분류 준비 상태를 확인하세요."),
     },
 )
-def search(body: ClauseSearchInput | SearchInput, request: Request, actor=Depends(search_actor)):
+def search(body: ClauseSearchInput | ModelClauseSearchInput | SearchInput,
+           request: Request, actor=Depends(search_actor)):
     request.app.state.auth_limiter.check(f"rag:{actor.kind}:{actor.id}", limit=30)
     if isinstance(body, ClauseSearchInput):
         return request.app.state.rag_search.search_clause(body.clause_id, body.text, body.labels, body.top_k)
+    if isinstance(body, ModelClauseSearchInput):
+        classification = request.app.state.classifier.predict(body.text)
+        result = request.app.state.rag_search.search_clause(
+            body.clause_id, body.text, classification["labels"], body.top_k,
+        )
+        return {**result, "classification": classification}
     return request.app.state.rag_search.search(body.query, body.top_k)

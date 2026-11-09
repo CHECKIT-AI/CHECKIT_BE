@@ -1,4 +1,9 @@
 -- Local validation only. Test records are rolled back.
+-- Expected: two rows after applying 004_analysis_context.sql.
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_schema='checkit' AND (
+    (table_name='analysis_jobs' AND column_name='analysis_context')
+    OR (table_name='check_items' AND column_name='rule_candidate'));
 BEGIN;
 DO $$
 DECLARE

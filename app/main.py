@@ -8,7 +8,11 @@ import psycopg
 from psycopg_pool import PoolTimeout
 
 from app.auth import router as auth_router
+from app.analysis import router as analysis_router
+from app.analysis_jobs import recover_interrupted_jobs, router as analysis_jobs_router
+from app.analysis_llm import GeminiReviewer
 from app.api_docs import API_DESCRIPTION, ENDPOINTS, TAGS
+from app.classifier import LocalClassifier, router as classifier_router
 from app.contracts import router as contracts_router
 from app.config import Settings
 from app.database import create_pool, verify_backend_role
@@ -33,6 +37,8 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
         database_pool.open()
         application.state.database_pool = database_pool
         try:
+            if pool is None:
+                recover_interrupted_jobs(database_pool)
             yield
         finally:
             database_pool.close()
@@ -44,6 +50,8 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
                                                  "displayRequestDuration": True})
     application.state.settings = resolved
     application.state.rag_search = LocalSearch(resolved)
+    application.state.classifier = LocalClassifier(resolved)
+    application.state.gemini_reviewer = GeminiReviewer(resolved)
     application.state.auth_limiter = RateLimiter()
     application.state.oauth_states = OAuthStateStore()
     application.state.oauth_client = ProviderClient()
@@ -55,12 +63,18 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
 
     @application.middleware("http")
     async def protect_auth_input(request, call_next):
-        if request.url.path.startswith(("/api/auth/", "/api/rag/")):
+        protected_limits = {
+            "/api/auth/": 16384, "/api/classifier/": 16384,
+            "/api/rag/": 16384, "/api/analysis/": 262144,
+        }
+        body_limit = next((limit for prefix, limit in protected_limits.items()
+                           if request.url.path.startswith(prefix)), None)
+        if body_limit is not None:
             if request.method == "POST":
                 body = bytearray()
                 async for chunk in request.stream():
                     body.extend(chunk)
-                    if len(body) > 16384:
+                    if len(body) > body_limit:
                         return JSONResponse(status_code=413, content=APIError(
                             413, "REQUEST_TOO_LARGE", "요청 크기가 너무 큽니다."
                         ).content())
@@ -91,7 +105,10 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
     application.include_router(auth_router)
     application.include_router(oauth_router)
     application.include_router(contracts_router)
+    application.include_router(classifier_router)
     application.include_router(rag_router)
+    application.include_router(analysis_router)
+    application.include_router(analysis_jobs_router)
 
     @application.get("/health/live", tags=["health"], **ENDPOINTS["live"])
     def live():

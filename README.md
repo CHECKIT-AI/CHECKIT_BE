@@ -2,16 +2,18 @@
 
 FastAPI + Supabase PostgreSQL 기반 계약서 분석 백엔드입니다.
 
-## 최근 변경 요약 (2026-11-08)
+## 최근 변경 요약 (2026-11-09)
 
 - **회원 전용:** 계약서 조회와 RAG 검색은 유효한 회원 세션이 필요합니다. 임시 사용자 세션과 기록 귀속 API는 제공하지 않습니다.
 
-- **RAG 입력:** `POST /api/rag/search`가 `clause_id`, `labels`, `text`, `top_k`를 받아 분류 라벨과 조항 원문을 함께 검색합니다. 기존 `query` 입력도 유지합니다.
+- **조항 분류:** 고정 커밋의 `rladmsgki/checkit-contract-classifier`를 프로세스당 한 번 로드하고 `POST /api/classifier/predict`로 10개 멀티라벨을 반환합니다.
+- **분류→검색 연결:** `POST /api/rag/search`의 조항 입력에서 `labels`를 생략하면 분류 모델을 실행한 뒤 같은 원문과 예측 라벨로 검색합니다. 명시적 라벨과 기존 `query` 입력도 유지합니다.
 - **검색 대상:** `employment_basic_v004`, **503청크**. 원문으로 전체 인덱스의 후보를 찾고 라벨로 작은 우선순위만 부여하며, 원문 금액·시간·날짜를 보존합니다.
 - **응답 연결:** 조항 ID·라벨·정책 버전과 근거별 원문·출처·기본 순위·라벨 반영 정보를 반환합니다. 미수집 연도 고시는 `warnings`로 알립니다.
-- **검증:** 백엔드 RAG 테스트 **22개**, Data 테스트 **24개** 통과. 실제 인증·CSRF를 포함한 조항 4건·기존 query 1건·중복 라벨 거부를 확인했습니다.
+- **규칙·Gemini 분석:** 저장된 확정 근로계약서에 대해 필수 항목 누락과 위약금·최저임금·가산수당·휴게시간 후보를 만들고, RAG 법령을 Gemini에 전달해 JSON 판단을 저장하는 비동기 job을 추가했습니다.
+- **검증:** 백엔드 기본 테스트 **105개 통과·5개 선택 테스트 제외**. Data 테스트는 이전 확인 기준 **25개 통과**입니다. 실제 Gemini 호출·공유 DB 통합 검증은 아직 수행하지 않았습니다.
 
-수동 라벨을 붙인 합성 조항 30개에서 Hit@1은 66.7%→70.0%, Hit@5는 93.3%(28/30)로 같았습니다. 이는 검색 개발 평가이며 **실제 분류 모델·OCR·위법 판정·설명 생성까지 연결한 결과는 아닙니다**. [조항 입력 평가 기록](../CheckIt_Data/test/rag/comparisons/labeled_clauses_v001_20261028/REPORT.md)을 참고하세요.
+수동 라벨을 붙인 합성 조항 30개에서 Hit@1은 66.7%→70.0%, Hit@5는 93.3%(28/30)로 같았습니다. 이는 **검색 개발 평가**이며 새 규칙·Gemini 분석의 정확도나 실제 계약서 종단간 성능을 검증한 수치가 아닙니다. [조항 입력 평가 기록](../CheckIt_Data/test/rag/comparisons/labeled_clauses_v001_20261028/REPORT.md)을 참고하세요.
 
 
 ## 실행
@@ -78,6 +80,64 @@ py -3.13 -m venv .venv
 
 현재 구현된 회원 전용 요청·응답 형식은 [API 명세](docs/api-reference.md)를 참고하세요.
 
+## 계약 조항 분류 모델 연결
+
+분류 기능만 준비할 때는 추가 의존성을 설치합니다. 모델은 최초 요청 시 Hugging Face에서 내려받아 로컬 캐시에 보관합니다.
+
+```bash
+.venv/bin/python -m pip install -r requirements-classifier.txt
+```
+
+`.env`에 다음 설정을 추가하고 서버를 재시작합니다. `revision`은 검토한 모델 커밋으로 고정하며 임의로 `main`을 사용하지 않습니다.
+
+```dotenv
+CHECKIT_CLASSIFIER_ENABLED=true
+CHECKIT_CLASSIFIER_MODEL_ID=rladmsgki/checkit-contract-classifier
+CHECKIT_CLASSIFIER_REVISION=aedfc58fa73fe5bc58a4e66a0cadaeef091fe59e
+CHECKIT_CLASSIFIER_DEVICE=cpu
+CHECKIT_CLASSIFIER_MAX_LENGTH=256
+```
+
+회원 로그인과 CSRF 발급 후 `POST /api/classifier/predict`를 호출합니다.
+
+```json
+{"text":"월 급여는 매월 25일 지급한다."}
+```
+
+응답에는 모델 ID·고정 revision·최대 토큰 길이·예측 라벨과 임계값을 넘은 점수가 포함됩니다. 분류 결과는 법률 판단이 아닙니다. 모델은 입력을 최대 256토큰으로 절단하며 프로세스당 하나만 로드합니다. 동시 분류는 `503 CLASSIFIER_BUSY`로 거부합니다.
+
+분류와 검색을 한 번에 확인하려면 RAG도 활성화한 뒤 `labels` 없이 조항을 전달합니다.
+
+```json
+{"clause_id":"clause_007","text":"월 급여는 매월 25일 지급한다.","top_k":5}
+```
+
+분류 결과가 빈 라벨이면 임의로 `그 외`를 추가하지 않습니다. `labels: []`를 유지한 채 조항 원문으로 검색하고 라벨 우선순위 정책은 적용하지 않습니다.
+
+## 저장된 근로계약서 규칙·Gemini 분석
+
+현재 파일 세대에 **확정된 텍스트 revision**이 있는 `EMPLOYMENT` 계약서만 분석합니다. 업로드·OCR·텍스트 확정 API는 이 기능에 포함되지 않습니다. 기존 DB에는 소유자 연결로 `database/004_analysis_context.sql`을 **한 번** 적용한 뒤 서버를 실행합니다. 초기 스키마나 역할 프로비저닝 SQL은 재실행하지 않습니다.
+
+분류와 RAG를 활성화하고 서버 전용 Gemini 키를 설정합니다. RAG 인덱스와 모델 준비는 아래 절을 따릅니다.
+
+```dotenv
+CHECKIT_CLASSIFIER_ENABLED=true
+CHECKIT_RAG_ENABLED=true
+CHECKIT_GEMINI_API_KEY=서버에서만_사용할_키
+CHECKIT_GEMINI_MODEL=gemini-3.8-flash
+CHECKIT_GEMINI_TIMEOUT_SECONDS=60
+```
+
+회원 쿠키와 최신 CSRF 토큰으로 `POST /api/analysis/contracts/{contract_id}/jobs`를 호출합니다. `effective_date`, `employee_count`, `work_type`, `weekly_hours`는 선택 입력이며 모르면 생략합니다.
+
+```json
+{"effective_date":"2026-11-09","employee_count":5,"work_type":"통상 근로","weekly_hours":40,"top_k":5}
+```
+
+`202` 응답의 `job_id`로 `GET /api/analysis/contracts/{contract_id}/jobs/{job_id}`를 조회합니다. `SUCCEEDED`면 `result.items`에 JSON 판단이, `result.citations`에 실제 인용된 RAG 청크가 들어갑니다. 계약서 상세 조회의 `current_result`에도 최신 결과가 반영됩니다. `FAILED`면 `error_code`를 보고 재요청할 수 있습니다. 동일 계약서의 동시 분석은 `409 ANALYSIS_CONFLICT`입니다. 서버 재시작으로 중단된 job은 실패 처리합니다.
+
+규칙은 필수 근로조건 누락, 위약금 예정, 명시적 최저임금 미달, 가산수당 배제, 휴게시간 부족의 **후보**를 찾습니다. 2026년 시급 기준은 [최저임금위원회 고시 현황](https://minimumwage.go.kr/minWage/policy/decisionMain.do)의 10,320원입니다. 다른 연도나 적용 조건이 불분명하면 `NEEDS_CONFIRMATION`으로 남깁니다. 원문과 법령은 Gemini API로 전송되며 모델 응답은 스키마와 인용 ID를 검증한 뒤에만 저장합니다. 현재 비동기 실행은 단일 서버 worker의 프로세스 내 BackgroundTasks를 사용합니다.
+
 ## 로컬 Chroma 검색 연결
 
 2026-10-28 기준 기본 검색 대상은 **`employment_basic_v004`(503청크)**입니다. Data의 BGE-M3 Chroma 인덱스를 사용하며, 백엔드 API의 검색 방식은 `dense`입니다. Data에 별도로 구축된 BM25는 이 API에서 사용하지 않습니다.
@@ -116,13 +176,13 @@ Swagger에서 CSRF 발급 → 회원 로그인 → 응답의 최신 CSRF 토큰�
 }
 ```
 
-분류 모델 결과의 라벨과 **해당 조항 원문**을 함께 전달합니다. `clause_id`는 원본 조항과 연결할 1~128자 ID, `text`는 1~2000자입니다. 라벨은 아래 10개 한국어 이름 중 중복 없이 1~10개를 받습니다.
+분류 모델 결과의 라벨과 **해당 조항 원문**을 함께 전달합니다. `clause_id`는 원본 조항과 연결할 1~128자 ID, `text`는 1~2000자입니다. 라벨은 아래 10개 한국어 이름 중 중복 없이 0~10개를 받습니다. 빈 배열이면 원문 검색만 수행합니다.
 
 `임금`, `근로시간`, `휴일`, `휴가`, `근무 장소·업무`, `계약기간`, `계약 종료`, `손해배상·위약금`, `기타 근로조건`, `그 외`.
 
 라벨은 작은 우선순위 신호로만 사용합니다. 전체 인덱스의 상위 20개 후보를 유지해 원문으로 검색하고, 연결 근거에 제한된 보너스를 적용합니다. 원문의 실제 금액·날짜·시간을 치환하지 않습니다. `그 외`도 검색을 생략하지 않습니다. 결과에 `clause_id`, `labels`, `retrieval_policy`를 반환하며 각 hit의 `base_rank`, `matched_labels`, `label_priority_score`로 우선순위 반영을 확인합니다. 프론트는 응답의 `rank` 순서를 유지합니다. `cosine_distance`는 변경 전 원래 거리이고 우선순위 점수는 정확도 확률이 아닙니다.
 
-기존 `{"query":"검색 문장","top_k":5}` 형식도 지원합니다. 두 형식을 섞으면 422를 반환합니다. 모델 분류·OCR 자체가 구현된 것은 아니며, 현재는 그 결과를 받는 검색 인터페이스입니다. [조항 입력 개발 평가](../CheckIt_Data/test/rag/comparisons/labeled_clauses_v001_20261028/REPORT.md)를 참고하세요.
+`labels`를 생략한 조항 입력은 설정된 분류 모델을 먼저 실행합니다. 기존 `{"query":"검색 문장","top_k":5}` 형식과 명시적 라벨 입력도 지원하며 형식을 섞으면 422를 반환합니다. 이 검색 API 자체는 판단·설명을 반환하지 않습니다. 저장된 계약서의 규칙·Gemini 판단은 위 분석 job API에서 수행합니다. [조항 입력 개발 평가](../CheckIt_Data/test/rag/comparisons/labeled_clauses_v001_20261028/REPORT.md)를 참고하세요.
 
 응답은 `corpus`, `method`, `results`, `warnings`이며 결과마다 조문 원문·메타데이터·cosine 거리를 반환합니다. 현재 기본 인덱스는 근로관계 12개 법령·선택 별표 8개·2026년 최저임금 고시, 총 503개 청크입니다. 설명 생성·위법 판정은 포함하지 않습니다. 고시의 적용 기간은 2026년이며 질문에 명시한 연도와 연간 고시 기간을 대조합니다. 미수집 연도는 `warnings`로 알리고, 일반 법령의 과거 버전은 자동 복원하지 않습니다. 검색 문장은 저장하지 않습니다. 고시·별표에는 자료 유형과 적용 기간 등 해당 자료에 있는 메타데이터도 반환합니다. 비밀유지·경업금지·사회보험·용역·파견·저작권에 대한 종합 판단까지 지원하는 것은 아닙니다.
 
@@ -142,7 +202,7 @@ Swagger에서 CSRF 발급 → 회원 로그인 → 응답의 최신 CSRF 토큰�
 
 | 방법 | 사용 안내 |
 |---|---|
-| 백엔드 레포 클론 후 로컬 실행 | 분석·RAG 외의 구현된 API를 연동할 때 사용합니다. 위 실행 절차에 따라 패키지와 `.env`를 설정하고, `CHECKIT_RAG_ENABLED=false`로 실행합니다. API 기본 주소는 `http://127.0.0.1:8000/api`입니다. |
+| 백엔드 레포 클론 후 로컬 실행 | 인증·계약서 조회 등 기본 API를 연동할 때 사용합니다. 위 실행 절차에 따라 패키지와 `.env`를 설정하고, RAG가 필요 없으면 `CHECKIT_RAG_ENABLED=false`로 실행합니다. API 기본 주소는 `http://127.0.0.1:8000/api`입니다. |
 | 담당자에게 서버 주소 요청 | 백엔드 클론이나 Chroma 설치 없이 전달받은 Cloudflare HTTPS 주소를 사용합니다. API 기본 주소는 `전달받은 주소/api`, Swagger는 `전달받은 주소/docs`입니다. RAG 기능 테스트는 이 방법을 사용합니다. |
 
 담당자 서버는 실행 중일 때만 사용할 수 있습니다. 테스트 전에 주소를 요청하고, 임시 주소가 변경되면 프론트의 연결 설정도 갱신합니다. 현재 제공되는 기능은 아래 구현 상태를 참고하세요.
@@ -161,8 +221,8 @@ CHECKIT_ALLOWED_ORIGINS=["http://127.0.0.1:8000","http://127.0.0.1:5173"]
 
 ## 구현 상태
 
-- **완료:** 이메일·카카오·구글 인증 API, 회원 소유권 검사, 기록 조회, 라벨+조항 원문을 받는 로컬 Chroma 법령 검색 API(추가 설치·설정 필요)
-- **예정:** 업로드, OCR·AI 분석 파이프라인, 분석·취소·원본 다운로드·삭제
+- **완료:** 이메일·카카오·구글 인증 API, 회원 소유권 검사, 기록 조회, 조항 분류 API, 분류→로컬 Chroma 검색 연결, 저장된 확정 원문의 규칙·Gemini 분석 job(추가 설치·설정 필요)
+- **예정:** 업로드, OCR, 텍스트 확정, 분석 취소·원본 다운로드·삭제
 
 계약서 기능은 로그인한 회원만 사용할 수 있으며, 회원 기록은 직접 삭제할 때까지 보관합니다.
 

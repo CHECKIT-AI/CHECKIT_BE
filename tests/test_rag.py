@@ -67,8 +67,82 @@ def test_clause_labels_and_original_text_are_forwarded_and_linked():
         assert response.json()["retrieval_policy"] == "labels_soft_priority_v1"
 
 
+def test_explicit_empty_labels_are_forwarded_without_priority_policy():
+    class ClauseService:
+        def search_clause(self, clause_id, text, labels, top_k):
+            assert (clause_id, text, labels, top_k) == ("c-empty", "분류되지 않은 조항", [], 5)
+            return {"corpus": "employment_basic_v004", "method": "dense", "results": [],
+                    "clause_id": clause_id, "labels": [], "retrieval_policy": None}
+
+    app = make_app()
+    app.state.rag_search.service = ClauseService()
+    with TestClient(app) as client:
+        response = client.post("/api/rag/search", json={
+            "clause_id": "c-empty", "labels": [], "text": "분류되지 않은 조항",
+        })
+        assert response.status_code == 200
+        assert response.json()["labels"] == []
+        assert response.json()["retrieval_policy"] is None
+
+
+def test_missing_labels_runs_classifier_then_clause_search():
+    class Classifier:
+        def predict(self, text):
+            assert text == "월 급여는 매월 25일 지급한다."
+            return {
+                "model_id": "rladmsgki/checkit-contract-classifier",
+                "revision": "aedfc58fa73fe5bc58a4e66a0cadaeef091fe59e",
+                "max_length": 256,
+                "labels": ["임금"],
+                "scores": [{"label": "임금", "score": 0.989, "threshold": 0.35}],
+            }
+
+    class ClauseService:
+        def search_clause(self, clause_id, text, labels, top_k):
+            assert (clause_id, text, labels, top_k) == (
+                "c-7", "월 급여는 매월 25일 지급한다.", ["임금"], 3,
+            )
+            return {"corpus": "employment_basic_v004", "method": "dense", "results": [],
+                    "clause_id": clause_id, "labels": labels,
+                    "retrieval_policy": "labels_soft_priority_v1"}
+
+    app = make_app()
+    app.state.classifier = Classifier()
+    app.state.rag_search.service = ClauseService()
+    with TestClient(app) as client:
+        response = client.post("/api/rag/search", json={
+            "clause_id": "c-7", "text": "월 급여는 매월 25일 지급한다.", "top_k": 3,
+        })
+        assert response.status_code == 200
+        assert response.json()["labels"] == ["임금"]
+        assert response.json()["classification"]["scores"][0]["threshold"] == 0.35
+
+
+def test_empty_model_labels_are_preserved_and_search_without_label_priority():
+    class Classifier:
+        def predict(self, _):
+            return {"model_id": "test/model", "revision": "a" * 40, "max_length": 256,
+                    "labels": [], "scores": []}
+
+    class ClauseService:
+        def search_clause(self, clause_id, text, labels, top_k):
+            assert (clause_id, text, labels, top_k) == ("c-7", "모호한 문장", [], 5)
+            return {"corpus": "employment_basic_v004", "method": "dense", "results": [],
+                    "clause_id": clause_id, "labels": [], "retrieval_policy": None}
+
+    app = make_app()
+    app.state.classifier = Classifier()
+    app.state.rag_search.service = ClauseService()
+    with TestClient(app) as client:
+        response = client.post("/api/rag/search", json={"clause_id": "c-7", "text": "모호한 문장"})
+        assert response.status_code == 200
+        assert response.json()["labels"] == []
+        assert response.json()["classification"]["labels"] == []
+        assert response.json()["retrieval_policy"] is None
+
+
 @pytest.mark.parametrize("patch", [
-    {"text": " "}, {"labels": []}, {"labels": ["임대차"]}, {"labels": ["임금", "임금"]},
+    {"text": " "}, {"labels": ["임대차"]}, {"labels": ["임금", "임금"]},
     {"clause_id": " "}, {"query": "혼합 입력"}, {"top_k": True}, {"text": "a" * 2001},
 ])
 def test_invalid_clause_payload_is_rejected(patch):

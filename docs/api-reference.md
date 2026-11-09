@@ -1,6 +1,6 @@
 # 회원 전용 백엔드 API 명세
 
-> 2026-11-08 현재 실제 구현 기준입니다. 계약서 업로드·OCR·AI 분석·취소·원본 다운로드·삭제 API는 아직 구현되지 않았습니다.
+> 저장된 확정 텍스트의 근로계약서 분석 job까지 구현되어 있습니다. 업로드·OCR·텍스트 확정·분석 취소·원본 다운로드·삭제 API는 아직 없습니다.
 
 **Base URL:** `http://localhost:8000`
 
@@ -27,11 +27,14 @@
 | 로그아웃 | POST | `/api/auth/logout` | 본문 없음 | `204` · 본문 없음 |
 | 내 계약서 목록 | GET | `/api/contracts` | Query: `limit=20&offset=0` | `200` · `{"contracts":ContractSummary[],"limit":20,"offset":0}` |
 | 계약서 상세 조회 | GET | `/api/contracts/{contract_id}` | Path: `contract_id` UUID | `200` · `ContractDetailResponse` |
-| 관련 법령 검색 | POST | `/api/rag/search` | 일반 검색 또는 조항 검색 입력 | `200` · 검색 corpus·결과·경고 |
+| 계약 조항 분류 | POST | `/api/classifier/predict` | `{"text":"계약 조항"}` | `200` · 예측 라벨·점수·임계값·모델 버전 |
+| 관련 법령 검색 | POST | `/api/rag/search` | 일반 검색, 명시적 라벨 조항 또는 자동 분류 조항 | `200` · 검색 corpus·결과·경고 |
+| 근로계약서 분석 시작 | POST | `/api/analysis/contracts/{contract_id}/jobs` | 선택: `effective_date`, `employee_count`, `work_type`, `weekly_hours`, `top_k` | `202` · `{"job_id":"UUID","status":"QUEUED"}` |
+| 분석 상태·결과 조회 | GET | `/api/analysis/contracts/{contract_id}/jobs/{job_id}` | 경로 UUID | `200` · 상태·단계·오류 코드·완료 결과 |
 
 `provider`는 `kakao` 또는 `google`입니다. 소셜 로그인 콜백은 프론트에서 직접 호출하지 않고 제공자가 브라우저를 이동시킵니다.
 
-RAG 검색은 다음 두 입력 중 하나만 사용합니다.
+RAG 검색은 다음 세 입력 중 하나만 사용합니다.
 
 ```json
 {"query":"검색 문장","top_k":5}
@@ -40,6 +43,16 @@ RAG 검색은 다음 두 입력 중 하나만 사용합니다.
 ```json
 {"clause_id":"clause_007","labels":["임금"],"text":"해당 조항 원문","top_k":5}
 ```
+
+```json
+{"clause_id":"clause_007","text":"분류 후 검색할 조항 원문","top_k":5}
+```
+
+마지막 형식은 고정 revision의 분류 모델을 먼저 호출하고 예측 라벨로 검색합니다. 빈 라벨은 `[]`로 유지하며 원문 검색만 수행하고 라벨 우선순위는 적용하지 않습니다.
+
+분석 시작은 회원 소유 `EMPLOYMENT` 계약서의 현재 파일 세대에 최신 **확정 텍스트 revision**이 있어야 합니다. POST에는 쿠키·Origin·CSRF가 필요합니다. `effective_date`는 `YYYY-MM-DD`, `employee_count`는 1~100000, `weekly_hours`는 0보다 크고 168 이하, `top_k`는 1~10입니다. 입력하지 않은 적용 조건은 미상으로 처리합니다. 최대 원문 30000자·조항 100개·조항당 2000자·문제 후보 50개입니다.
+
+상태는 `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`입니다. 완료 결과는 `analysis_results`와 `check_items`, 인용된 경우 `law_citations`에 저장됩니다. 각 점검 항목의 `rule_candidate`에는 규칙 코드·초기 상태 후보·원문 위치·확인 필요 정보가 들어갑니다. `status=FAILED`일 때 `error_code`만 반환하며 외부 모델 응답 전문은 반환하지 않습니다. 주요 오류: `409 ANALYSIS_INPUT_UNAVAILABLE`(근로계약서·확정 원문 없음), `409 ANALYSIS_CONFLICT`(동시 분석), `422 ANALYSIS_INPUT_LIMIT`, `503 ANALYSIS_UNAVAILABLE`.
 
 ## 입력 제한
 
@@ -53,6 +66,7 @@ RAG 검색은 다음 두 입력 중 하나만 사용합니다.
 | `limit` | 정수 1~100, 기본 20 |
 | `offset` | 정수 0~10000, 기본 0 |
 | `top_k` | 정수 1~10, 기본 5 |
+| 분류·조항 검색 `text` | 공백이 아닌 문자열, 최대 2000자. 분류 모델 입력은 최대 256토큰으로 절단 |
 
 ## 응답 타입
 
@@ -117,6 +131,7 @@ type CheckItem = {
   explanation: string;
   required_information: unknown[];
   source_locations: unknown[];
+  rule_candidate: Record<string, unknown>;
 };
 
 type Citation = {
@@ -167,4 +182,18 @@ type ErrorResponse = {
   };
 };
 ```
+
+# OCR 우회 계약서 분석
+
+`POST /api/analysis/contracts/text`는 OCR이 완료되었다고 가정한 페이지별 텍스트를 입력받아 조항 분리, 기존 멀티라벨 분류, `employment_basic_v004` 법령 검색을 순서대로 수행한다. 실제 LLM 판단은 호출하지 않고 조항별 `llm_context`를 반환한다.
+
+```json
+{
+  "contract_id": "contract-001",
+  "pages": [{"page": 1, "text": "제1조(임금)\n임금은 매월 25일 지급한다."}],
+  "top_k": 5
+}
+```
+
+응답의 `input_mode`는 `OCR_BYPASS_TEXT`, 완료 단계는 `OCR_SKIPPED`부터 `RETRIEVAL_COMPLETE`까지 기록된다. `llm_context`에는 조항 원문, 페이지, 분류 라벨, 관련 법령 후보가 포함된다. 필수 조항 누락은 단일 조항 검색으로 판단하지 않고 `document_context.missing_required_review_needed`를 확인하여 계약서 전체 단위 후속 판단에서 처리한다.
 

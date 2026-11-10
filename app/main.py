@@ -66,6 +66,7 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
         protected_limits = {
             "/api/auth/": 16384, "/api/classifier/": 16384,
             "/api/rag/": 16384, "/api/analysis/": 262144,
+            "/api/contracts": 262144,
         }
         body_limit = next((limit for prefix, limit in protected_limits.items()
                            if request.url.path.startswith(prefix)), None)

@@ -58,6 +58,8 @@ def test_job_api_creates_owned_job_and_exposes_status(monkeypatch):
     with TestClient(make_app(monkeypatch, conn)) as client:
         response = client.post(f"/api/analysis/contracts/{CONTRACT_ID}/jobs", json={
             "effective_date": "2026-11-09", "employee_count": 5,
+            "privacy_confirmed": True,
+            "gemini_notice_acknowledged": True,
         })
         assert response.status_code == 202
         job_id = response.json()["job_id"]
@@ -79,7 +81,10 @@ def test_job_rejects_unconfirmed_revision(monkeypatch):
                 self.row = None
             return self
     with TestClient(make_app(monkeypatch, Missing())) as client:
-        response = client.post(f"/api/analysis/contracts/{CONTRACT_ID}/jobs", json={})
+        response = client.post(f"/api/analysis/contracts/{CONTRACT_ID}/jobs", json={
+            "privacy_confirmed": True,
+            "gemini_notice_acknowledged": True,
+        })
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "ANALYSIS_INPUT_UNAVAILABLE"
 
@@ -91,6 +96,17 @@ def test_stored_revision_rejects_oversized_clause_without_truncation():
         assert getattr(exc, "code", None) == "ANALYSIS_INPUT_LIMIT"
     else:
         raise AssertionError("expected input limit")
+
+
+def test_citations_require_official_source_and_applicable_effective_date():
+    hit = {"chunk_id": "law:1", "metadata": {
+        "source_url": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1",
+        "article_effective_date": "20261008", "is_deleted": False,
+    }}
+    assert jobs._verified_citations(["law:1"], [hit], jobs.date(2026, 11, 9))
+    assert not jobs._verified_citations(["law:1"], [hit], jobs.date(2026, 1, 1))
+    hit["metadata"]["source_url"] = "https://example.com/law"
+    assert not jobs._verified_citations(["law:1"], [hit], jobs.date(2026, 11, 9))
 
 
 class WorkerConn:

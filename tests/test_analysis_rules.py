@@ -53,3 +53,13 @@ def test_monthly_wage_and_low_premium_are_review_candidates():
                        {"effective_date": "2026-11-09", "employee_count": 5, "weekly_hours": 40})
     assert next(x for x in found if x["check_code"] == "MINIMUM_WAGE_MONTHLY")["status_hint"] == "NEEDS_CONFIRMATION"
     assert next(x for x in found if x["check_code"] == "OVERTIME_PREMIUM")["status_hint"] == "CAUTION"
+
+
+def test_contractual_disadvantages_are_separate_from_legal_candidates():
+    rows = [clause("회사는 필요에 따라 근무지를 변경할 수 있다."),
+            clause("근로자는 모든 손해를 전액 배상할 책임이 있다.", 2)]
+    found = candidates(rows, [classification([]) for _ in rows], {})
+    by_code = {item["check_code"]: item for item in found}
+    assert by_code["UNILATERAL_CHANGE"]["category"] == "DISADVANTAGE"
+    assert by_code["BROAD_LIABILITY"]["category"] == "DISADVANTAGE"
+    assert by_code["MISSING_WAGE_PAYMENT"]["category"] == "MISSING"

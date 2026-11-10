@@ -2,6 +2,7 @@
 
 import re
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -11,11 +12,14 @@ from app.api_docs import error_response
 from app.classifier import ClassificationOutput
 from app.errors import APIError
 from app.rag import SearchHit
+from app.privacy import has_direct_identifier
 
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
 MAX_CLAUSE_LENGTH = 2000
+MAX_CLAUSES = 100
+MAX_DOCUMENT_LENGTH = 30000
 HEADING = re.compile(
     r"(?m)^(?=(?:제\s*\d+\s*조(?:의\s*\d+)?(?:\s*\([^\n)]*\))?|\d+\s*[.)]|[가-하]\s*[.)])\s*)"
 )
@@ -129,6 +133,20 @@ def split_contract(contract_id: str, pages: list[TextPage]):
     return output
 
 
+def stored_clauses(contract_id: UUID, content: str, blocks: list | None = None) -> list[dict]:
+    page_ranges = blocks if blocks and all(
+        isinstance(block, dict) and set(block) == {"page", "start", "end"}
+        for block in blocks
+    ) else [{"page": None, "start": 0, "end": len(content)}]
+    parts = [(block["page"], text) for block in page_ranges
+             for text in split_page_clauses(content[block["start"]:block["end"]])]
+    if (len(content) > MAX_DOCUMENT_LENGTH or len(parts) > MAX_CLAUSES
+            or any(len(text) > MAX_CLAUSE_LENGTH for _, text in parts)):
+        raise APIError(422, "ANALYSIS_INPUT_LIMIT", "확정 원문의 조항 수 또는 조항 길이를 줄여 주세요.")
+    return [{"clause_id": f"{contract_id}:c{i:04d}", "page": page, "text": text}
+            for i, (page, text) in enumerate(parts, 1)]
+
+
 def analysis_actor(request: Request):
     with request.app.state.database_pool.connection() as conn:
         return current_actor(request, conn)
@@ -143,7 +161,7 @@ def analysis_actor(request: Request):
         401: error_response("AUTHENTICATION_REQUIRED", "회원 세션 필요", "인증이 필요합니다.", "LOGIN"),
         403: error_response("CSRF_FAILED", "CSRF 토큰 또는 Origin 오류", "보안 토큰을 확인하세요."),
         413: error_response("REQUEST_TOO_LARGE", "본문 262,144바이트 초과", "요청 크기가 너무 큽니다."),
-        422: error_response("INVALID_INPUT", "입력 형식·페이지 순서·조항 길이 오류", "입력 형식을 확인하세요."),
+        422: error_response("PERSONAL_DATA_DETECTED", "입력 형식·페이지 순서·조항 길이·개인정보 탐지 오류", "개인정보를 가린 뒤 다시 확인해 주세요."),
         429: error_response("RATE_LIMITED", "세션당 분당 10회 초과", "잠시 후 다시 시도하세요.", retryable=True),
         503: error_response("ANALYSIS_UNAVAILABLE", "분류 또는 검색 준비 실패", "분류 모델과 RAG 준비 상태를 확인하세요.", retryable=True),
     },
@@ -151,6 +169,8 @@ def analysis_actor(request: Request):
 def analyze_contract_text(body: ContractTextAnalysisInput, request: Request,
                           actor=Depends(analysis_actor)):
     request.app.state.auth_limiter.check(f"analysis:{actor.kind}:{actor.id}", limit=10)
+    if any(has_direct_identifier(page.text) for page in body.pages):
+        raise APIError(422, "PERSONAL_DATA_DETECTED", "개인정보를 가린 뒤 다시 확인해 주세요.")
     clauses = split_contract(body.contract_id, body.pages)
     analyzed = []
     label_coverage = set()

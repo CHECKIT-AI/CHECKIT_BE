@@ -1,6 +1,8 @@
 """Persisted, member-owned employment contract analysis jobs."""
 
 from datetime import date
+from typing import Literal
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Path, Request
@@ -8,20 +10,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from psycopg.types.json import Jsonb
 
 from app.access import connection, current_actor, require_contract, require_csrf
-from app.analysis import MAX_CLAUSE_LENGTH, split_page_clauses
+from app.analysis import MAX_DOCUMENT_LENGTH, stored_clauses
 from app.analysis_llm import GeminiReviewer, LLMUnavailable, PROMPT_VERSION
 from app.analysis_rules import RULE_VERSION, candidates
 from app.api_docs import error_response
 from app.errors import APIError, not_found
+from app.privacy import has_direct_identifier
 
 router = APIRouter(prefix="/api/analysis/contracts", tags=["analysis"])
-MAX_CLAUSES = 100
 MAX_CANDIDATES = 50
-MAX_DOCUMENT_LENGTH = 30000
 
 
 class JobInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    privacy_confirmed: Literal[True]
+    gemini_notice_acknowledged: Literal[True]
     effective_date: date | None = None
     employee_count: int | None = Field(default=None, ge=1, le=100000, strict=True)
     work_type: str | None = Field(default=None, max_length=80)
@@ -42,19 +45,9 @@ class JobStatus(BaseModel):
     result: dict | None
 
 
-def stored_clauses(contract_id: UUID, content: str) -> list[dict]:
-    # text_revisions.content is a single confirmed document, not a page map.
-    parts = split_page_clauses(content)
-    if (len(content) > MAX_DOCUMENT_LENGTH or len(parts) > MAX_CLAUSES
-            or any(len(part) > MAX_CLAUSE_LENGTH for part in parts)):
-        raise APIError(422, "ANALYSIS_INPUT_LIMIT", "확정 원문의 조항 수 또는 조항 길이를 줄여 주세요.")
-    return [{"clause_id": f"{contract_id}:c{i:04d}", "page": None, "text": text}
-            for i, text in enumerate(parts, 1)]
-
-
 def _revision(conn, contract_id, generation):
     return conn.execute(
-        "SELECT id,content FROM checkit.text_revisions "
+        "SELECT id,content,blocks FROM checkit.text_revisions "
         "WHERE contract_id=%s AND file_generation_id=%s AND confirmed_at IS NOT NULL "
         "ORDER BY revision DESC LIMIT 1", (contract_id, generation),
     ).fetchone()
@@ -63,13 +56,13 @@ def _revision(conn, contract_id, generation):
 @router.post(
     "/{contract_id}/jobs", status_code=202, response_model=JobAccepted,
     dependencies=[Depends(require_csrf)], summary="확정 근로계약서 분석 job 생성",
-    description="회원 소유 계약서의 현재 세대·최신 확정 원문을 분류·규칙 검사·법령 검색·Gemini JSON 판단하고 결과를 저장합니다.",
+    description="회원 소유 계약서의 현재 세대·최신 확정 마스킹 원문을 분석합니다. Gemini 전송 안내 확인이 필요합니다.",
     responses={401: error_response("AUTHENTICATION_REQUIRED", "회원 세션 필요", "인증이 필요합니다."),
                403: error_response("CSRF_FAILED", "CSRF 또는 Origin 오류", "보안 토큰을 확인하세요."),
                404: error_response("CONTRACT_NOT_FOUND", "접근 가능한 계약서 없음", "접근 가능한 계약서를 찾을 수 없습니다."),
                413: error_response("REQUEST_TOO_LARGE", "본문 262,144바이트 초과", "요청 크기가 너무 큽니다."),
                409: error_response("ANALYSIS_CONFLICT", "확정 원문 없음 또는 분석 진행 중", "계약서 상태를 확인하세요."),
-               422: error_response("ANALYSIS_INPUT_LIMIT", "입력 형식 또는 원문 길이 오류", "입력을 확인하세요."),
+               422: error_response("PERSONAL_DATA_DETECTED", "입력 형식·원문 길이·개인정보 탐지 오류", "개인정보를 가린 뒤 다시 확인해 주세요."),
                429: error_response("RATE_LIMITED", "세션당 분당 10회 초과", "잠시 후 다시 시도하세요.", retryable=True),
                503: error_response("ANALYSIS_UNAVAILABLE", "분석 기능 미설정", "분석 설정을 확인하세요.")},
 )
@@ -86,7 +79,9 @@ def create_job(body: JobInput, background: BackgroundTasks, request: Request,
     revision = _revision(conn, contract_id, contract["current_file_generation_id"])
     if not revision:
         raise APIError(409, "ANALYSIS_INPUT_UNAVAILABLE", "현재 세대의 확정 원문이 필요합니다.")
-    stored_clauses(contract_id, revision["content"])
+    if has_direct_identifier(revision["content"]):
+        raise APIError(422, "PERSONAL_DATA_DETECTED", "개인정보를 가린 뒤 다시 확인해 주세요.")
+    stored_clauses(contract_id, revision["content"], revision.get("blocks"))
     context = body.model_dump(mode="json")
     job_id = uuid4()
     try:
@@ -154,6 +149,27 @@ def _law_hits(search, candidate, top_k):
         return search.search_clause(candidate["clause_id"], candidate["quoted_text"],
                                     candidate["labels"], top_k)
     return search.search(candidate["explanation"] + " 근로기준법 근로조건 명시", top_k)
+
+
+def _verified_citations(chunk_ids, hits, effective_date):
+    by_id = {hit["chunk_id"]: hit for hit in hits}
+    for chunk_id in chunk_ids:
+        metadata = by_id[chunk_id]["metadata"]
+        source = urlparse(metadata.get("source_url", ""))
+        if source.scheme != "https" or source.hostname not in {
+            "www.law.go.kr", "law.go.kr", "www.minimumwage.go.kr", "minimumwage.go.kr"
+        }:
+            return False
+        raw = metadata.get("article_effective_date") or metadata.get("snapshot_effective_date")
+        if not raw or metadata.get("is_deleted"):
+            return False
+        try:
+            cited_date = date.fromisoformat(raw if "-" in raw else f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}")
+        except (TypeError, ValueError):
+            return False
+        if cited_date > effective_date:
+            return False
+    return True
 
 
 def _save_result(conn, job, clauses, classified, decisions, corpus, model):
@@ -229,7 +245,7 @@ def run_job(app, job_id: UUID):
             revision = _revision(conn, job["contract_id"], job["file_generation_id"])
             if not revision or revision["id"] != job["input_revision_id"]:
                 raise APIError(409, "ANALYSIS_STALE_INPUT", "분석 중 계약서 입력이 변경되었습니다.")
-            clauses = stored_clauses(job["contract_id"], revision["content"])
+            clauses = stored_clauses(job["contract_id"], revision["content"], revision.get("blocks"))
         classified = [app.state.classifier.predict(clause["text"]) for clause in clauses]
         found = candidates(clauses, classified, job["analysis_context"])
         if len(found) > MAX_CANDIDATES:
@@ -254,9 +270,17 @@ def run_job(app, job_id: UUID):
             answer = reviewer.judge(review_input, hits, job["analysis_context"])
             # The 2026-only reviewed notice cannot substantiate other-year conclusions.
             effective = job["analysis_context"].get("effective_date")
-            if not effective or date.fromisoformat(effective).year != 2026:
+            verified = bool(effective and answer.citation_chunk_ids and
+                            _verified_citations(answer.citation_chunk_ids, hits, date.fromisoformat(effective)))
+            if candidate["category"] == "DISADVANTAGE" and not verified:
+                answer.citation_chunk_ids = []
+            if candidate["category"] != "DISADVANTAGE" and (
+                not effective or date.fromisoformat(effective).year != 2026
+                or not verified
+            ):
                 answer.status = "NEEDS_CONFIRMATION"
                 answer.citation_chunk_ids = []
+                answer.explanation = "적용 시점과 법령 근거를 검증할 수 없어 판단을 보류합니다."
             decisions.append((candidate, answer, hits))
         with pool.connection() as conn:
             _save_result(conn, job, clauses, classified, decisions, corpus, app.state.settings.gemini_model)

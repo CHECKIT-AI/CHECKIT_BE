@@ -2,7 +2,7 @@
 
 FastAPI + Supabase PostgreSQL 기반 계약서 분석 백엔드입니다.
 
-## 최근 변경 요약 (2026-11-09)
+## 최근 변경 요약 (2026-11-10)
 
 - **회원 전용:** 계약서 조회와 RAG 검색은 유효한 회원 세션이 필요합니다. 임시 사용자 세션과 기록 귀속 API는 제공하지 않습니다.
 
@@ -11,7 +11,8 @@ FastAPI + Supabase PostgreSQL 기반 계약서 분석 백엔드입니다.
 - **검색 대상:** `employment_basic_v004`, **503청크**. 원문으로 전체 인덱스의 후보를 찾고 라벨로 작은 우선순위만 부여하며, 원문 금액·시간·날짜를 보존합니다.
 - **응답 연결:** 조항 ID·라벨·정책 버전과 근거별 원문·출처·기본 순위·라벨 반영 정보를 반환합니다. 미수집 연도 고시는 `warnings`로 알립니다.
 - **규칙·Gemini 분석:** 저장된 확정 근로계약서에 대해 필수 항목 누락과 위약금·최저임금·가산수당·휴게시간 후보를 만들고, RAG 법령을 Gemini에 전달해 JSON 판단을 저장하는 비동기 job을 추가했습니다.
-- **검증:** 백엔드 기본 테스트 **105개 통과·5개 선택 테스트 제외**. Data 테스트는 이전 확인 기준 **25개 통과**입니다. 실제 Gemini 호출·공유 DB 통합 검증은 아직 수행하지 않았습니다.
+- **브라우저 OCR 연동 경계:** 브라우저에서 확인·마스킹한 페이지별 텍스트만 `POST /api/contracts`로 저장합니다. 파일 원본은 받지 않습니다. 일방적 조건 변경·광범위한 손해 책임·퇴사 후 취업 제한은 법적 점검과 구분한 계약상 불리함 후보로 검토합니다. [확정 설계](docs/contract-risk-detection-design.md)를 참고하세요.
+- **검증:** 백엔드 기본 테스트 **109개 통과·5개 선택 테스트 제외**. Data 테스트는 이전 확인 기준 **25개 통과**입니다. 실제 Gemini 호출·공유 DB 통합 검증은 아직 수행하지 않았습니다.
 
 수동 라벨을 붙인 합성 조항 30개에서 Hit@1은 66.7%→70.0%, Hit@5는 93.3%(28/30)로 같았습니다. 이는 **검색 개발 평가**이며 새 규칙·Gemini 분석의 정확도나 실제 계약서 종단간 성능을 검증한 수치가 아닙니다. [조항 입력 평가 기록](../CheckIt_Data/test/rag/comparisons/labeled_clauses_v001_20261028/REPORT.md)을 참고하세요.
 
@@ -116,7 +117,7 @@ CHECKIT_CLASSIFIER_MAX_LENGTH=256
 
 ## 저장된 근로계약서 규칙·Gemini 분석
 
-현재 파일 세대에 **확정된 텍스트 revision**이 있는 `EMPLOYMENT` 계약서만 분석합니다. 업로드·OCR·텍스트 확정 API는 이 기능에 포함되지 않습니다. 기존 DB에는 소유자 연결로 `database/004_analysis_context.sql`을 **한 번** 적용한 뒤 서버를 실행합니다. 초기 스키마나 역할 프로비저닝 SQL은 재실행하지 않습니다.
+현재 세대에 **확정된 마스킹 텍스트 revision**이 있는 `EMPLOYMENT` 계약서만 분석합니다. 브라우저가 OCR·마스킹을 수행하고, `POST /api/contracts`는 확인된 텍스트만 저장합니다. 원본 업로드·서버 OCR은 없습니다. 기존 DB에 `database/004_analysis_context.sql`이 이미 적용되어 있다면 다시 실행하지 않습니다. 초기 스키마나 역할 프로비저닝 SQL은 재실행하지 않습니다.
 
 분류와 RAG를 활성화하고 서버 전용 Gemini 키를 설정합니다. RAG 인덱스와 모델 준비는 아래 절을 따릅니다.
 
@@ -128,15 +129,15 @@ CHECKIT_GEMINI_MODEL=gemini-3.8-flash
 CHECKIT_GEMINI_TIMEOUT_SECONDS=60
 ```
 
-회원 쿠키와 최신 CSRF 토큰으로 `POST /api/analysis/contracts/{contract_id}/jobs`를 호출합니다. `effective_date`, `employee_count`, `work_type`, `weekly_hours`는 선택 입력이며 모르면 생략합니다.
+회원 쿠키와 최신 CSRF 토큰으로 `POST /api/contracts`에 마스킹 페이지 텍스트를 저장한 뒤 `POST /api/analysis/contracts/{contract_id}/jobs`를 호출합니다. 두 요청 모두 사용자의 개인정보 확인과 Gemini 전송 안내 확인이 필요합니다. `effective_date`, `employee_count`, `work_type`, `weekly_hours`는 선택 입력이며 문서에서 확인되지 않으면 생략합니다.
 
 ```json
-{"effective_date":"2026-11-09","employee_count":5,"work_type":"통상 근로","weekly_hours":40,"top_k":5}
+{"privacy_confirmed":true,"gemini_notice_acknowledged":true,"effective_date":"2026-11-09","employee_count":5,"work_type":"통상 근로","weekly_hours":40,"top_k":5}
 ```
 
 `202` 응답의 `job_id`로 `GET /api/analysis/contracts/{contract_id}/jobs/{job_id}`를 조회합니다. `SUCCEEDED`면 `result.items`에 JSON 판단이, `result.citations`에 실제 인용된 RAG 청크가 들어갑니다. 계약서 상세 조회의 `current_result`에도 최신 결과가 반영됩니다. `FAILED`면 `error_code`를 보고 재요청할 수 있습니다. 동일 계약서의 동시 분석은 `409 ANALYSIS_CONFLICT`입니다. 서버 재시작으로 중단된 job은 실패 처리합니다.
 
-규칙은 필수 근로조건 누락, 위약금 예정, 명시적 최저임금 미달, 가산수당 배제, 휴게시간 부족의 **후보**를 찾습니다. 2026년 시급 기준은 [최저임금위원회 고시 현황](https://minimumwage.go.kr/minWage/policy/decisionMain.do)의 10,320원입니다. 다른 연도나 적용 조건이 불분명하면 `NEEDS_CONFIRMATION`으로 남깁니다. 원문과 법령은 Gemini API로 전송되며 모델 응답은 스키마와 인용 ID를 검증한 뒤에만 저장합니다. 현재 비동기 실행은 단일 서버 worker의 프로세스 내 BackgroundTasks를 사용합니다.
+규칙은 필수 근로조건 누락, 위약금 예정, 명시적 최저임금 미달, 가산수당 배제, 휴게시간 부족의 **후보**와 계약상 불리함 후보를 찾습니다. 2026년 시급 기준은 [최저임금위원회 고시 현황](https://minimumwage.go.kr/minWage/policy/decisionMain.do)의 10,320원입니다. 다른 연도나 법령 근거가 확인되지 않으면 법적 판단은 `NEEDS_CONFIRMATION`으로 남깁니다. 마스킹된 원문과 법령은 Gemini API로 전송되며 모델 응답은 스키마와 인용 ID를 검증한 뒤에만 저장합니다. 현재 비동기 실행은 단일 서버 worker의 프로세스 내 BackgroundTasks를 사용합니다.
 
 ## 로컬 Chroma 검색 연결
 

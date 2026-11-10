@@ -37,6 +37,7 @@ class GeminiReviewer:
                 "제공된 법령만 인용하고 법령의 적용 시점·사업장 규모·예외를 확인하세요.",
                 "정보가 부족하거나 법령 시점이 맞지 않으면 NEEDS_CONFIRMATION으로 답하세요.",
                 "누락 후보는 문서 전체에서의 부재만 검토하고 단정하지 마세요.",
+                "DISADVANTAGE는 법 위반 여부와 구분해 근로자에게 불리할 수 있는 이유만 설명하세요.",
                 "citation_chunk_ids에는 제공된 chunk_id만 넣으세요.",
             ],
             "candidate": candidate, "applicability": context,

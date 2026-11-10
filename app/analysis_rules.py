@@ -22,9 +22,9 @@ REQUIRED = (
 )
 
 
-def _candidate(code, clause=None, *, status="CAUTION", explanation="", needed=(), labels=()):
+def _candidate(code, clause=None, *, category="LEGAL_RISK", status="CAUTION", explanation="", needed=(), labels=()):
     return {
-        "check_code": code, "status_hint": status,
+        "check_code": code, "category": category, "status_hint": status,
         "clause_id": clause["clause_id"] if clause else None,
         "quoted_text": clause["text"] if clause else None,
         "explanation": explanation, "required_information": list(needed),
@@ -44,7 +44,7 @@ def candidates(clauses: list[dict], classifications: list[dict], context: dict) 
         lexical = any(re.search(pattern, whole_text) for pattern in patterns)
         if label not in labels or not lexical:
             output.append(_candidate(
-                f"MISSING_{code}", status="MISSING_SUSPECTED" if not lexical and label not in labels
+                f"MISSING_{code}", category="MISSING", status="MISSING_SUSPECTED" if not lexical and label not in labels
                 else "NEEDS_CONFIRMATION", explanation=f"{name}의 명시 여부를 확인해야 합니다.",
                 needed=(name,), labels=(label,),
             ))
@@ -53,6 +53,18 @@ def candidates(clauses: list[dict], classifications: list[dict], context: dict) 
     headcount = context.get("employee_count")
     for clause in clauses:
         text = clause["text"]
+        if re.search(r"(?:회사|사용자).{0,30}(?:필요에\s*따라|임의로|일방적으로).{0,35}(?:근무지|근무\s*장소|업무|직무|임금).{0,15}변경", text, re.S):
+            output.append(_candidate("UNILATERAL_CHANGE", clause, category="DISADVANTAGE",
+                                     explanation="회사가 주요 근로조건을 일방적으로 바꿀 수 있는 문구 후보입니다.",
+                                     labels=("기타 근로조건",)))
+        if re.search(r"(?:모든|일체의|전액).{0,30}(?:손해|손실).{0,30}(?:배상|책임)", text, re.S):
+            output.append(_candidate("BROAD_LIABILITY", clause, category="DISADVANTAGE",
+                                     explanation="근로자에게 손해 책임을 넓게 지우는 문구 후보입니다.",
+                                     labels=("손해배상·위약금",)))
+        if re.search(r"(?:퇴사|퇴직).{0,40}(?:경쟁업체|동종업계|동종\s*업체).{0,30}(?:취업|근무).{0,10}(?:금지|제한)", text, re.S):
+            output.append(_candidate("POST_EMPLOYMENT_RESTRICTION", clause, category="DISADVANTAGE",
+                                     explanation="퇴사 후 취업을 제한하는 문구 후보입니다.",
+                                     labels=("기타 근로조건",)))
         penalty = re.search(r"(퇴사|퇴직|계약\s*불이행|중도\s*해지).{0,45}(위약금|벌금|배상액|손해배상액).{0,25}(원|지급|배상)", text, re.S)
         penalty = penalty or re.search(r"(퇴사|퇴직|계약\s*불이행|중도\s*해지).{0,35}[\d,]+\s*만?원.{0,20}(위약금|벌금|배상)", text, re.S)
         if penalty and not re.search(r"위약금\s*(?:없음|없다|미부과)", text):

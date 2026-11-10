@@ -9,10 +9,10 @@ API_DESCRIPTION = """
 TAGS = [
     {"name": "health", "description": "(상태확인) 서버·DB 연결 확인"},
     {"name": "auth", "description": "(인증) 가입·로그인"},
-    {"name": "contracts", "description": "(계약서) 내 기록 조회"},
+    {"name": "contracts", "description": "(계약서) 마스킹된 확정 텍스트 저장·내 기록 조회"},
     {"name": "classifier", "description": "(조항분류) 계약 조항 멀티라벨 분류"},
     {"name": "rag", "description": "(법령검색) 로컬 Chroma 관련 조문 검색"},
-    {"name": "analysis", "description": "(계약분석) OCR 우회 검색 및 저장된 근로계약서 규칙·Gemini 분석"},
+    {"name": "analysis", "description": "(계약분석) 확정된 마스킹 근로계약서의 규칙·Gemini 분석"},
 ]
 
 

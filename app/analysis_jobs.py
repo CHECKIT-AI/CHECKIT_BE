@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from app.access import connection, current_actor, require_contract, require_csrf
 from app.analysis import MAX_DOCUMENT_LENGTH, stored_clauses
-from app.analysis_llm import GeminiReviewer, LLMUnavailable, PROMPT_VERSION
+from app.analysis_llm import GeminiReviewer, LLMInputTooLarge, LLMUnavailable, PROMPT_VERSION
 from app.analysis_rules import RULE_VERSION, candidates
 from app.api_docs import error_response
 from app.errors import APIError, not_found
@@ -252,22 +252,19 @@ def run_job(app, job_id: UUID):
             raise APIError(422, "ANALYSIS_INPUT_LIMIT", "문제 후보 수가 분석 제한을 초과했습니다.")
         _stage(pool, job_id, "RETRIEVE")
         reviewer = app.state.gemini_reviewer
-        decisions = []
+        reviews = []
         corpus = app.state.settings.rag_corpus
-        for candidate in found:
+        for index, candidate in enumerate(found, 1):
             retrieved = _law_hits(app.state.rag_search, candidate, job["analysis_context"]["top_k"])
             corpus = retrieved["corpus"]
-            hits = retrieved["results"]
-            _stage(pool, job_id, "EVALUATE")
-            review_input = {**candidate}
-            if candidate["clause_id"] is None:
-                review_input["document_clauses"] = [
-                    {"clause_id": clause["clause_id"], "text": clause["text"],
-                     "labels": classification["labels"]}
-                    for clause, classification in zip(clauses, classified)
-                ]
-            review_input["retrieval_warnings"] = retrieved.get("warnings", [])
-            answer = reviewer.judge(review_input, hits, job["analysis_context"])
+            reviews.append(({**candidate, "candidate_id": f"candidate_{index:04d}",
+                             "retrieval_warnings": retrieved.get("warnings", [])},
+                            retrieved["results"]))
+        _stage(pool, job_id, "EVALUATE")
+        answers = reviewer.judge(clauses, reviews, job["analysis_context"])
+        decisions = []
+        for candidate, hits in reviews:
+            answer = answers[candidate["candidate_id"]]
             # The 2026-only reviewed notice cannot substantiate other-year conclusions.
             effective = job["analysis_context"].get("effective_date")
             verified = bool(effective and answer.citation_chunk_ids and
@@ -285,13 +282,15 @@ def run_job(app, job_id: UUID):
         with pool.connection() as conn:
             _save_result(conn, job, clauses, classified, decisions, corpus, app.state.settings.gemini_model)
     except Exception as exc:
-        code = (exc.code if isinstance(exc, APIError) else "LLM_UNAVAILABLE" if isinstance(exc, LLMUnavailable)
-                else "ANALYSIS_FAILED")
+        code = (exc.code if isinstance(exc, APIError) else "ANALYSIS_INPUT_LIMIT"
+                if isinstance(exc, LLMInputTooLarge) else "LLM_UNAVAILABLE"
+                if isinstance(exc, LLMUnavailable) else "ANALYSIS_FAILED")
+        recovery = "NONE" if code == "ANALYSIS_INPUT_LIMIT" else "RETRY"
         try:
             with pool.connection() as conn:
                 conn.execute(
-                    "UPDATE checkit.analysis_jobs SET status='FAILED',error_code=%s,recovery_action='RETRY',finished_at=now() "
-                    "WHERE id=%s AND status IN ('QUEUED','RUNNING')", (code, job_id),
+                    "UPDATE checkit.analysis_jobs SET status='FAILED',error_code=%s,recovery_action=%s,finished_at=now() "
+                    "WHERE id=%s AND status IN ('QUEUED','RUNNING')", (code, recovery, job_id),
                 )
         except Exception:
             pass

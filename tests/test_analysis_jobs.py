@@ -8,7 +8,7 @@ import app.analysis_jobs as jobs
 from app.access import require_csrf
 from app.config import Settings
 from app.main import create_app
-from app.analysis_llm import Judgment, LLMUnavailable
+from app.analysis_llm import Judgment, LLMInputTooLarge, LLMUnavailable
 
 CONTRACT_ID = UUID("550e8400-e29b-41d4-a716-446655440000")
 GENERATION_ID = UUID("550e8400-e29b-41d4-a716-446655440001")
@@ -112,6 +112,7 @@ def test_citations_require_official_source_and_applicable_effective_date():
 class WorkerConn:
     def __init__(self):
         self.failed_code = None
+        self.recovery_action = None
 
     def __enter__(self): return self
     def __exit__(self, *args): return False
@@ -125,6 +126,7 @@ class WorkerConn:
             self.row = {"id": REVISION_ID, "content": "시급 9,000원으로 한다."}
         elif "status='FAILED'" in sql:
             self.failed_code = args[0]
+            self.recovery_action = args[1]
             self.row = None
         else:
             raise AssertionError(sql)
@@ -145,15 +147,17 @@ class WorkerSearch:
         return {"corpus": "employment_basic_v004", "results": []}
 
 
-def test_worker_passes_full_document_for_missing_review_and_saves_only_after_all_judgments(monkeypatch):
+def test_worker_reviews_all_candidates_once_and_saves_only_after_judgment(monkeypatch):
     reviewed = []
     saved = []
 
     class Reviewer:
-        def judge(self, candidate, hits, context):
-            reviewed.append(candidate)
-            return Judgment(status="NEEDS_CONFIRMATION", explanation="확인 필요",
-                            required_information=[], citation_chunk_ids=[])
+        def judge(self, clauses, reviews, context):
+            reviewed.append((clauses, reviews))
+            return {candidate["candidate_id"]: Judgment(
+                status="NEEDS_CONFIRMATION", explanation="확인 필요",
+                required_information=[], citation_chunk_ids=[])
+                for candidate, _ in reviews}
 
     app = SimpleNamespace(state=SimpleNamespace(
         database_pool=WorkerPool(), classifier=SimpleNamespace(predict=lambda text: {
@@ -163,14 +167,16 @@ def test_worker_passes_full_document_for_missing_review_and_saves_only_after_all
     monkeypatch.setattr(jobs, "_stage", lambda *args: None)
     monkeypatch.setattr(jobs, "_save_result", lambda *args: saved.append(args))
     jobs.run_job(app, CONTRACT_ID)
-    assert reviewed and saved
-    assert all("document_clauses" in row for row in reviewed if row["clause_id"] is None)
+    assert len(reviewed) == 1 and saved
+    assert reviewed[0][0][0]["text"] == "시급 9,000원으로 한다."
+    assert len({candidate["candidate_id"] for candidate, _ in reviewed[0][1]}) == len(reviewed[0][1])
+    assert len(saved[0][4]) == len(reviewed[0][1])
     assert app.state.database_pool.conn.failed_code is None
 
 
 def test_worker_records_sanitized_failure_code(monkeypatch):
     class Reviewer:
-        def judge(self, candidate, hits, context):
+        def judge(self, clauses, reviews, context):
             raise LLMUnavailable("provider secret details")
 
     app = SimpleNamespace(state=SimpleNamespace(
@@ -181,3 +187,20 @@ def test_worker_records_sanitized_failure_code(monkeypatch):
     monkeypatch.setattr(jobs, "_stage", lambda *args: None)
     jobs.run_job(app, CONTRACT_ID)
     assert app.state.database_pool.conn.failed_code == "LLM_UNAVAILABLE"
+    assert app.state.database_pool.conn.recovery_action == "RETRY"
+
+
+def test_worker_reports_unsplittable_input_without_retry(monkeypatch):
+    class Reviewer:
+        def judge(self, clauses, reviews, context):
+            raise LLMInputTooLarge("provider details")
+
+    app = SimpleNamespace(state=SimpleNamespace(
+        database_pool=WorkerPool(), classifier=SimpleNamespace(predict=lambda text: {
+            "labels": [], "model_id": "test/model", "revision": "test-revision"}), rag_search=WorkerSearch(),
+        gemini_reviewer=Reviewer(), settings=SimpleNamespace(rag_corpus="employment_basic_v004",
+                                                     gemini_model="gemini-3.8-flash")))
+    monkeypatch.setattr(jobs, "_stage", lambda *args: None)
+    jobs.run_job(app, CONTRACT_ID)
+    assert app.state.database_pool.conn.failed_code == "ANALYSIS_INPUT_LIMIT"
+    assert app.state.database_pool.conn.recovery_action == "NONE"

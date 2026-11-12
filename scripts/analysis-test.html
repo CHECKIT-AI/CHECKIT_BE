@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CheckIt 로컬 계약서 분석 테스트</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 850px; margin: 2rem auto; padding: 0 1rem; }
+  label { display: block; margin: 1rem 0; }
+  textarea { display: block; width: 100%; min-height: 12rem; box-sizing: border-box; }
+  .preview { display: block; max-width: 100%; max-height: 40rem; margin: .75rem 0; }
+  input, button { font: inherit; }
+  button { padding: .5rem 1rem; margin: .5rem .5rem .5rem 0; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f3f3; padding: 1rem; }
+  .page { border-top: 1px solid #bbb; margin-top: 1rem; }
+</style>
+<h1>계약서 분석 테스트</h1>
+<p>인증을 마친 회원 계정으로 로그인하세요. <a href="/api/auth/oauth/test">소셜 로그인</a> · <a href="/docs">API 문서</a></p>
+<form id="email-login">
+  <label>이메일 <input id="email" type="email" autocomplete="username" required></label>
+  <label>비밀번호 <input id="password" type="password" autocomplete="current-password" required></label>
+  <button type="submit">이메일 로그인</button>
+</form>
+<p>파일은 브라우저에서만 읽습니다. OCR 결과를 원본과 대조하고 이름·주소·연락처·계좌번호 등 식별정보를 직접 가리세요. 임금·시간·날짜는 판단에 필요합니다. 전송한 텍스트와 분석 결과는 회원 계약서 기록으로 DB에 남습니다.</p>
+<label>PDF 한 개 또는 순서대로 정렬된 JPG·PNG 최대 10장
+  <input id="files" type="file" accept="application/pdf,image/jpeg,image/png" multiple>
+</label>
+<button id="ocr">브라우저에서 읽기</button>
+<div id="pages"></div>
+<label>계약 적용일 <input id="effective" type="date"></label>
+<label>상시 근로자 수 <input id="employees" type="number" min="1" max="100000"></label>
+<label>주당 근로시간 <input id="hours" type="number" min="0.1" max="168" step="0.1"></label>
+<label><input id="privacy" type="checkbox"> 모든 페이지를 원본과 대조했고 개인정보를 마스킹했습니다.</label>
+<label><input id="notice" type="checkbox"> 마스킹한 계약 문구가 Gemini API로 전송됨을 확인했습니다.</label>
+<button id="analyze">확정 텍스트 저장 후 분석</button>
+<p id="status" role="status" aria-live="polite">파일을 선택하세요.</p>
+<pre id="result" aria-label="분석 결과"></pre>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script type="module">
+  const $ = id => document.getElementById(id);
+  const status = message => { $("status").textContent = message; };
+  const request = async (path, options = {}) => {
+    const response = await fetch(path, {credentials: "include", ...options});
+    const body = await response.json();
+    if (!response.ok) throw Error(body.error?.message || `${response.status} 요청 실패`);
+    return body;
+  };
+  const csrf = async () => (await request("/api/auth/csrf")).csrf_token;
+  $("email-login").onsubmit = async event => {
+    event.preventDefault();
+    const button = $("email-login").querySelector("button");
+    button.disabled = true;
+    try {
+      await request("/api/auth/login", {method: "POST", headers: {
+        "Content-Type": "application/json", "X-CSRF-Token": await csrf()
+      }, body: JSON.stringify({email: $("email").value, password: $("password").value})});
+      status("이메일 로그인 완료. 계약서 파일을 선택하세요.");
+    } catch (error) {
+      status(error.message);
+    } finally {
+      $("password").value = "";
+      button.disabled = false;
+    }
+  };
+  let inputKind = null;
+  let contractId = null;
+  let completed = false;
+  let imageUrls = [];
+
+  $("files").onchange = () => {
+    imageUrls.forEach(URL.revokeObjectURL);
+    imageUrls = [];
+    inputKind = null;
+    contractId = null;
+    completed = false;
+    $("pages").replaceChildren();
+    $("privacy").checked = false;
+    $("notice").checked = false;
+    $("analyze").disabled = true;
+    $("result").textContent = "";
+  };
+
+  $("ocr").onclick = async () => {
+    const files = [...$("files").files].sort((a, b) =>
+      a.name.localeCompare(b.name, "ko", {numeric: true}));
+    if (!files.length) return status("파일을 선택하세요.");
+    if (!(files.length === 1 && files[0].type === "application/pdf") &&
+        !(files.length <= 10 && files.every(file => ["image/jpeg", "image/png"].includes(file.type)))) {
+      return status("PDF 한 개 또는 JPG·PNG 최대 10장만 선택하세요.");
+    }
+    $("ocr").disabled = true;
+    $("files").disabled = true;
+    $("analyze").disabled = true;
+    $("pages").replaceChildren();
+    $("privacy").checked = false;
+    $("notice").checked = false;
+    inputKind = null;
+    contractId = null;
+    completed = false;
+    let worker;
+    try {
+      inputKind = files[0].type === "application/pdf" ? "PDF" : "IMAGES";
+      const pageData = [];
+      if (inputKind === "PDF") {
+        status("PDF를 여는 중입니다.");
+        const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs");
+        pdfjs.GlobalWorkerOptions.workerSrc =
+          "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
+        const pdf = await pdfjs.getDocument({data: new Uint8Array(await files[0].arrayBuffer())}).promise;
+        if (pdf.numPages > 10) throw Error("최대 10페이지까지 분석할 수 있습니다.");
+        for (let index = 1; index <= pdf.numPages; index++) {
+          status(`${index}/${pdf.numPages}페이지를 읽는 중입니다.`);
+          const page = await pdf.getPage(index);
+          const extracted = (await page.getTextContent()).items.map(item =>
+            item.str + (item.hasEOL ? "\n" : " ")).join("").trim();
+          const viewport = page.getViewport({scale: 2});
+          const canvas = document.createElement("canvas");
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({canvasContext: canvas.getContext("2d"), viewport}).promise;
+          canvas.className = "preview";
+          if (!extracted) worker ||= await Tesseract.createWorker("kor");
+          pageData.push({text: extracted || (await worker.recognize(canvas)).data.text,
+            preview: canvas});
+        }
+      } else {
+        worker = await Tesseract.createWorker("kor");
+        for (const [index, file] of files.entries()) {
+          status(`${index + 1}/${files.length}장 OCR 중입니다.`);
+          const image = document.createElement("img");
+          image.className = "preview";
+          image.alt = `${index + 1}페이지 원본`;
+          image.src = URL.createObjectURL(file);
+          imageUrls.push(image.src);
+          pageData.push({text: (await worker.recognize(file)).data.text, preview: image});
+        }
+      }
+      for (const [index, value] of pageData.entries()) {
+        const section = document.createElement("section");
+        section.className = "page";
+        const label = document.createElement("label");
+        label.textContent = `${index + 1}페이지: 확인·수정·마스킹한 텍스트`;
+        const area = document.createElement("textarea");
+        area.value = value.text;
+        area.maxLength = 20000;
+        area.required = true;
+        area.oninput = () => { $("privacy").checked = false; };
+        label.append(area);
+        section.append(value.preview, label);
+        $("pages").append(section);
+      }
+      status("모든 페이지를 원본과 대조하고 개인정보를 마스킹하세요.");
+      $("analyze").disabled = false;
+    } catch (error) {
+      status(error.message);
+      inputKind = null;
+    } finally {
+      if (worker) await worker.terminate();
+      $("files").value = "";
+      $("files").disabled = false;
+      $("ocr").disabled = false;
+    }
+  };
+
+  $("analyze").onclick = async () => {
+    const pages = [...$("pages").querySelectorAll("textarea")].map((area, index) => ({
+      page: index + 1, text: area.value.trim()
+    }));
+    if (!inputKind || !pages.length || pages.some(page => !page.text)) return status("모든 페이지의 텍스트를 확인하세요.");
+    if (!$("privacy").checked || !$("notice").checked) return status("마스킹과 Gemini 전송 안내를 확인하세요.");
+    $("analyze").disabled = true;
+    $("result").textContent = "";
+    try {
+      if (!contractId) {
+        status("확정 텍스트를 저장하는 중입니다.");
+        const created = await request("/api/contracts", {method: "POST", headers: {
+          "Content-Type": "application/json", "X-CSRF-Token": await csrf()
+        }, body: JSON.stringify({input_kind: inputKind, pages,
+          privacy_confirmed: true, gemini_notice_acknowledged: true})});
+        contractId = created.contract_id;
+        $("pages").querySelectorAll("textarea").forEach(area => { area.disabled = true; });
+      }
+      const context = {privacy_confirmed: true, gemini_notice_acknowledged: true};
+      if ($("effective").value) context.effective_date = $("effective").value;
+      if ($("employees").value) context.employee_count = Number($("employees").value);
+      if ($("hours").value) context.weekly_hours = Number($("hours").value);
+      status(`계약서 ${contractId} 저장 완료. 분석을 시작합니다.`);
+      const job = await request(`/api/analysis/contracts/${contractId}/jobs`, {method: "POST", headers: {
+        "Content-Type": "application/json", "X-CSRF-Token": await csrf()
+      }, body: JSON.stringify(context)});
+      for (;;) {
+        const state = await request(`/api/analysis/contracts/${contractId}/jobs/${job.job_id}`);
+        status(`계약서 ${contractId} · ${state.status} · ${state.stage || "대기"}`);
+        if (state.status === "SUCCEEDED" || state.status === "FAILED") {
+          $("result").textContent = JSON.stringify(state, null, 2);
+          completed = state.status === "SUCCEEDED";
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    } catch (error) {
+      status(error.message);
+    } finally {
+      $("analyze").disabled = completed;
+    }
+  };
+</script>
+</html>

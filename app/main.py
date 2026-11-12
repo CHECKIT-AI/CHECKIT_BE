@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
+from pathlib import Path
 import psycopg
 from psycopg_pool import PoolTimeout
 
@@ -56,6 +58,10 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
     application.state.oauth_states = OAuthStateStore()
     application.state.oauth_client = ProviderClient()
     application.state.dummy_password_hash = hash_password("checkit-dummy-password")
+    if resolved.environment == "development":
+        @application.get("/dev/analysis-test", include_in_schema=False)
+        def analysis_test_page():
+            return FileResponse(Path(__file__).parent.parent / "scripts" / "analysis-test.html")
     application.add_middleware(CORSMiddleware, allow_origins=resolved.allowed_origins,
                                allow_credentials=True, allow_methods=["GET", "POST"],
                                allow_headers=["Content-Type", "X-CSRF-Token"])

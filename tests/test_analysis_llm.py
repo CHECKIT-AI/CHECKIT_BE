@@ -30,7 +30,7 @@ def result_for(candidate_ids, citations=None):
     return {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": json.dumps({
         "items": [{"candidate_id": candidate_id, "status": "NEEDS_CONFIRMATION",
                    "explanation": "확인 필요", "required_information": [],
-                   "citation_chunk_ids": (citations or {}).get(candidate_id, [])}
+                   "citation_chunk_ids": (citations or {}).get(candidate_id, []), "findings": []}
                   for candidate_id in candidate_ids],
     })}]}}]}
 
@@ -127,3 +127,23 @@ def test_candidate_cannot_cite_another_candidates_law(monkeypatch):
 def test_no_candidates_skip_gemini(monkeypatch):
     monkeypatch.setattr(httpx.Client, "post", lambda *args, **kwargs: pytest.fail("unexpected call"))
     assert reviewer().judge([], [], {}) == {}
+
+
+def test_scan_finding_accepts_only_its_own_law(monkeypatch):
+    scan = ({"candidate_id": "scan_0001", "check_code": "DISCOVERED_ISSUE",
+             "category": "CLAUSE_SCAN", "clause_id": "c1", "explanation": "추가 검토",
+             "required_information": [], "retrieval_warnings": []}, reviews()[0][1])
+
+    def post(self, url, **kwargs):
+        body = result_for(["scan_0001"])
+        item = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        item["items"][0]["findings"] = [{"category": "LEGAL_RISK", "explanation": "추가 문제",
+            "required_information": [], "citation_chunk_ids": ["law:1"]}]
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(item)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    assert reviewer().judge([{"clause_id": "c1", "text": "원문"}], [scan], {})["scan_0001"].findings[0].explanation == "추가 문제"
+    scan[1][0]["chunk_id"] = "law:2"
+    with pytest.raises(LLMUnavailable):
+        reviewer().judge([{"clause_id": "c1", "text": "원문"}], [scan], {})

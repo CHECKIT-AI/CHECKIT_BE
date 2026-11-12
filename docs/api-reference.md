@@ -59,9 +59,9 @@ RAG 검색은 다음 세 입력 중 하나만 사용합니다.
 
 분석 시작은 회원 소유 `EMPLOYMENT` 계약서의 현재 세대에 최신 **확정 마스킹 텍스트 revision**이 있어야 합니다. POST에는 쿠키·Origin·CSRF와 두 확인 플래그가 필요합니다. `effective_date`는 `YYYY-MM-DD`, `employee_count`는 1~100000, `weekly_hours`는 0보다 크고 168 이하, `top_k`는 1~10입니다. 문서에서 확인되지 않은 적용 조건은 보내지 않고 미상으로 처리합니다. 최대 원문 30000자·조항 100개·조항당 2000자·문제 후보 50개입니다.
 
-상태는 `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`입니다. 완료 결과는 `analysis_results`와 `check_items`, 인용된 경우 `law_citations`에 저장됩니다. `rule_candidate.category`는 `MISSING`, `LEGAL_RISK`, `DISADVANTAGE` 중 하나이며, 원문 위치·확인 필요 정보도 포함합니다. 파일 없는 텍스트 계약의 상세 응답은 `files`·`pages`가 빈 배열이고 페이지 범위는 `text.blocks`의 `{page,start,end}`로 표현합니다. `status=FAILED`일 때 `error_code`만 반환하며 외부 모델 응답 전문은 반환하지 않습니다. 주요 오류: `409 ANALYSIS_INPUT_UNAVAILABLE`, `409 ANALYSIS_CONFLICT`, `422 ANALYSIS_INPUT_LIMIT`, `422 PERSONAL_DATA_DETECTED`, `503 ANALYSIS_UNAVAILABLE`.
+상태는 `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`입니다. 완료 결과는 `analysis_results`와 `check_items`, 인용된 경우 `law_citations`에 저장됩니다. `rule_candidate.category`는 `MISSING`, `LEGAL_RISK`, `DISADVANTAGE` 중 하나이며, Gemini가 새로 발견한 항목에는 `rule_candidate.source="GEMINI"`가 들어갑니다. 원문 위치·확인 필요 정보도 포함합니다. 새 발견은 적용 시점·법령 출처를 검증할 수 없으면 `NEEDS_CONFIRMATION`으로 저장합니다. 문제 항목이 없을 때 summary는 검출된 문제가 없다는 사실과 검토 범위의 한계를 함께 알립니다. 파일 없는 텍스트 계약의 상세 응답은 `files`·`pages`가 빈 배열이고 페이지 범위는 `text.blocks`의 `{page,start,end}`로 표현합니다. `status=FAILED`일 때 `error_code`만 반환하며 외부 모델 응답 전문은 반환하지 않습니다. 주요 오류: `409 ANALYSIS_INPUT_UNAVAILABLE`, `409 ANALYSIS_CONFLICT`, `422 ANALYSIS_INPUT_LIMIT`, `422 PERSONAL_DATA_DETECTED`, `503 ANALYSIS_UNAVAILABLE`.
 
-분석 job은 후보마다 RAG를 검색한 뒤 계약서 전체 조항과 중복 제거한 법령 청크를 보통 한 번의 Gemini 요청에 묶습니다. 각 후보는 고유 `candidate_id`와 관련 법령 ID를 갖고, Gemini 응답의 후보 누락·중복·교차 인용은 저장 전에 거부합니다. 입력·출력 한도 초과 때만 후보를 나눠 다시 호출합니다. 기존의 후보별 Gemini 호출 방식은 더 이상 사용하지 않습니다.
+분석 job은 모든 조항을 분류·RAG 검색하고, 문서 전체의 필수 항목 누락도 검색합니다. 기존 규칙 후보의 검색 근거와 함께 보통 한 번의 Gemini 요청에 묶습니다. 각 검토 단위는 고유 ID와 관련 법령 ID를 갖고, Gemini 응답의 누락·중복·교차 인용은 저장 전에 거부합니다. Gemini는 규칙 후보 판단 외에 조항별 추가 문제와 문서 전체의 추가 누락을 제안할 수 있습니다. 입력·출력 한도 초과 때만 검토 단위를 나눠 다시 호출합니다. 이 검색과 모델 판단은 법률 전문가의 검토를 대체하지 않습니다.
 
 ## 입력 제한
 

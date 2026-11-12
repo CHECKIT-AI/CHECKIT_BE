@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from app.access import connection, current_actor, require_contract, require_csrf
 from app.analysis import MAX_DOCUMENT_LENGTH, stored_clauses
-from app.analysis_llm import GeminiReviewer, LLMInputTooLarge, LLMUnavailable, PROMPT_VERSION
+from app.analysis_llm import GeminiReviewer, Judgment, LLMInputTooLarge, LLMUnavailable, PROMPT_VERSION
 from app.analysis_rules import RULE_VERSION, candidates
 from app.api_docs import error_response
 from app.errors import APIError, not_found
@@ -19,6 +19,7 @@ from app.privacy import has_direct_identifier
 
 router = APIRouter(prefix="/api/analysis/contracts", tags=["analysis"])
 MAX_CANDIDATES = 50
+MAX_DISCOVERIES = 50
 
 
 class JobInput(BaseModel):
@@ -185,8 +186,10 @@ def _save_result(conn, job, clauses, classified, decisions, corpus, model):
     conn.execute("DELETE FROM checkit.analysis_results WHERE contract_id=%s", (job["contract_id"],))
     counts = {status: sum(1 for _, answer, _ in decisions if answer.status == status)
               for status in ("CAUTION", "MISSING_SUSPECTED", "NEEDS_CONFIRMATION", "PRESENT")}
-    summary = f"{len(clauses)}개 조항, {len(decisions)}개 후보 검토: " + ", ".join(
+    summary = f"{len(clauses)}개 조항, {len(decisions)}개 항목 검토: " + ", ".join(
         f"{key} {value}건" for key, value in counts.items())
+    if not any(counts[status] for status in ("CAUTION", "MISSING_SUSPECTED", "NEEDS_CONFIRMATION")):
+        summary += ". 검출된 문제 없음; 검토 범위에 한계가 있습니다."
     result_id = conn.execute(
         "INSERT INTO checkit.analysis_results "
         "(contract_id,job_id,file_generation_id,input_revision_id,summary,model_versions,prompt_version,corpus_version,rule_version) "
@@ -254,8 +257,30 @@ def run_job(app, job_id: UUID):
         reviewer = app.state.gemini_reviewer
         reviews = []
         corpus = app.state.settings.rag_corpus
+        top_k = job["analysis_context"]["top_k"]
+        clause_hits = {}
+        for index, (clause, classification) in enumerate(zip(clauses, classified), 1):
+            retrieved = app.state.rag_search.search_clause(
+                clause["clause_id"], clause["text"], classification["labels"], top_k)
+            corpus = retrieved["corpus"]
+            clause_hits[clause["clause_id"]] = retrieved
+            reviews.append(({
+                "candidate_id": f"scan_{index:04d}", "category": "CLAUSE_SCAN",
+                "clause_id": clause["clause_id"], "check_code": "DISCOVERED_ISSUE",
+                "explanation": "이 조항에서 추가 문제를 검토합니다.", "required_information": [],
+                "retrieval_warnings": retrieved.get("warnings", []),
+            }, retrieved["results"]))
+        document_search = app.state.rag_search.search(
+            "근로계약서 필수 근로조건 명시 임금 근로시간 휴일 연차 근무 장소 업무", top_k)
+        reviews.append(({
+            "candidate_id": "scan_document", "category": "DOCUMENT_SCAN",
+            "clause_id": None, "check_code": "DISCOVERED_MISSING",
+            "explanation": "계약서 전체에서 추가 누락을 검토합니다.",
+            "required_information": [], "retrieval_warnings": document_search.get("warnings", []),
+        }, document_search["results"]))
         for index, candidate in enumerate(found, 1):
-            retrieved = _law_hits(app.state.rag_search, candidate, job["analysis_context"]["top_k"])
+            retrieved = (clause_hits[candidate["clause_id"]] if candidate["clause_id"]
+                         else _law_hits(app.state.rag_search, candidate, top_k))
             corpus = retrieved["corpus"]
             reviews.append(({**candidate, "candidate_id": f"candidate_{index:04d}",
                              "retrieval_warnings": retrieved.get("warnings", [])},
@@ -263,8 +288,30 @@ def run_job(app, job_id: UUID):
         _stage(pool, job_id, "EVALUATE")
         answers = reviewer.judge(clauses, reviews, job["analysis_context"])
         decisions = []
+        discovery_count = 0
+        clauses_by_id = {clause["clause_id"]: clause for clause in clauses}
         for candidate, hits in reviews:
             answer = answers[candidate["candidate_id"]]
+            if candidate["category"] in {"CLAUSE_SCAN", "DOCUMENT_SCAN"}:
+                for finding in answer.findings:
+                    discovery_count += 1
+                    if discovery_count > MAX_DISCOVERIES:
+                        raise APIError(422, "ANALYSIS_INPUT_LIMIT", "새 문제 발견 수가 제한을 초과했습니다.")
+                    clause = clauses_by_id.get(candidate["clause_id"])
+                    discovered = {
+                        "candidate_id": candidate["candidate_id"],
+                        "check_code": "DISCOVERED_MISSING" if finding.category == "MISSING" else "DISCOVERED_ISSUE",
+                        "category": finding.category, "clause_id": candidate["clause_id"],
+                        "quoted_text": clause["text"] if clause else None,
+                        "labels": [], "source": "GEMINI",
+                        "source_locations": ([{"clause_id": clause["clause_id"],
+                                             "page": clause.get("page")}] if clause else []),
+                    }
+                    decisions.append((discovered, Judgment(
+                        status="NEEDS_CONFIRMATION", explanation=finding.explanation,
+                        required_information=finding.required_information,
+                        citation_chunk_ids=finding.citation_chunk_ids), hits))
+                continue
             # The 2026-only reviewed notice cannot substantiate other-year conclusions.
             effective = job["analysis_context"].get("effective_date")
             verified = bool(effective and answer.citation_chunk_ids and
@@ -279,6 +326,17 @@ def run_job(app, job_id: UUID):
                 answer.citation_chunk_ids = []
                 answer.explanation = "적용 시점과 법령 근거를 검증할 수 없어 판단을 보류합니다."
             decisions.append((candidate, answer, hits))
+        for candidate, answer, hits in decisions:
+            if candidate.get("source") != "GEMINI":
+                continue
+            effective = job["analysis_context"].get("effective_date")
+            verified = bool(effective and answer.citation_chunk_ids and
+                            _verified_citations(answer.citation_chunk_ids, hits, date.fromisoformat(effective)))
+            if not effective or date.fromisoformat(effective).year != 2026 or not verified:
+                answer.citation_chunk_ids = []
+                answer.explanation = "적용 시점과 법령 근거를 검증할 수 없어 판단을 보류합니다. " + answer.explanation
+            else:
+                answer.status = "MISSING_SUSPECTED" if candidate["category"] == "MISSING" else "CAUTION"
         with pool.connection() as conn:
             _save_result(conn, job, clauses, classified, decisions, corpus, app.state.settings.gemini_model)
     except Exception as exc:

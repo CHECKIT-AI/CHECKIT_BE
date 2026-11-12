@@ -62,6 +62,12 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
         @application.get("/dev/analysis-test", include_in_schema=False)
         def analysis_test_page():
             return FileResponse(Path(__file__).parent.parent / "scripts" / "analysis-test.html")
+
+        @application.get("/dev/email-verification", include_in_schema=False)
+        def email_verification_page():
+            return FileResponse(Path(__file__).parent.parent / "scripts" / "email-verification.html",
+                                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                                         "X-Content-Type-Options": "nosniff"})
     application.add_middleware(CORSMiddleware, allow_origins=resolved.allowed_origins,
                                allow_credentials=True, allow_methods=["GET", "POST"],
                                allow_headers=["Content-Type", "X-CSRF-Token"])

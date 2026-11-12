@@ -75,6 +75,16 @@ def test_signup_requires_csrf_and_does_not_touch_database():
         assert not conn.calls
 
 
+def test_development_email_link_has_confirmation_page():
+    with TestClient(create_app(settings(), Pool(Connection()))) as client:
+        response = client.get("/dev/email-verification")
+        assert response.status_code == 200
+        assert "이메일 인증 완료" in response.text
+        assert "location.hash" in response.text
+        assert "history.replaceState" in response.text
+        assert response.headers["Cache-Control"] == "no-store"
+
+
 def test_origin_and_cross_browser_csrf_rejected():
     app = create_app(settings(), Pool(Connection()))
     with TestClient(app) as first, TestClient(app) as second:

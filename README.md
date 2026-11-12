@@ -6,7 +6,7 @@ FastAPI + Supabase PostgreSQL 기반 계약서 분석 백엔드입니다.
 
 - **회원 전용:** 계약서 조회와 RAG 검색은 유효한 회원 세션이 필요합니다. 임시 사용자 세션과 기록 귀속 API는 제공하지 않습니다.
 
-- **조항 분류:** 고정 커밋의 `rladmsgki/checkit-contract-classifier`를 프로세스당 한 번 로드하고 `POST /api/classifier/predict`로 10개 멀티라벨을 반환합니다.
+- **조항 분류:** 고정 커밋의 `hur03/checkit-contract-classifier-core-synthetic-v1`을 프로세스당 한 번 로드하고 `POST /api/classifier/predict`로 10개 멀티라벨을 반환합니다.
 - **분류→검색 연결:** `POST /api/rag/search`의 조항 입력에서 `labels`를 생략하면 분류 모델을 실행한 뒤 같은 원문과 예측 라벨로 검색합니다. 명시적 라벨과 기존 `query` 입력도 유지합니다.
 - **검색 대상:** `employment_basic_v004`, **503청크**. 원문으로 전체 인덱스의 후보를 찾고 라벨로 작은 우선순위만 부여하며, 원문 금액·시간·날짜를 보존합니다.
 - **응답 연결:** 조항 ID·라벨·정책 버전과 근거별 원문·출처·기본 순위·라벨 반영 정보를 반환합니다. 미수집 연도 고시는 `warnings`로 알립니다.
@@ -94,11 +94,13 @@ py -3.13 -m venv .venv
 
 ```dotenv
 CHECKIT_CLASSIFIER_ENABLED=true
-CHECKIT_CLASSIFIER_MODEL_ID=rladmsgki/checkit-contract-classifier
-CHECKIT_CLASSIFIER_REVISION=aedfc58fa73fe5bc58a4e66a0cadaeef091fe59e
+CHECKIT_CLASSIFIER_MODEL_ID=hur03/checkit-contract-classifier-core-synthetic-v1
+CHECKIT_CLASSIFIER_REVISION=7fb6bc333b01919d7e59c1937e9457266d574cbe
 CHECKIT_CLASSIFIER_DEVICE=cpu
 CHECKIT_CLASSIFIER_MAX_LENGTH=256
 ```
+
+현재 모델은 [CheckIt KLUE-RoBERTa 공개 모델](https://huggingface.co/hur03/checkit-contract-classifier-core-synthetic-v1)이며, core train 3,470개와 합성 문장 240개로 학습했습니다. 고정된 revision은 위 설정값을 따릅니다. 446개 core test에서 micro F1 0.858, macro F1 0.829를 기록했으며, 합성 라벨은 미검수이므로 이 수치를 운영 성능이나 법률 판단 정확도로 해석하지 않습니다.
 
 회원 로그인과 CSRF 발급 후 `POST /api/classifier/predict`를 호출합니다.
 

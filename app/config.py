@@ -50,11 +50,11 @@ class Settings(BaseSettings):
     rag_method: Literal["dense", "hybrid_rerank"] = "dense"
     classifier_enabled: bool = False
     classifier_model_id: str = Field(
-        default="rladmsgki/checkit-contract-classifier",
+        default="hur03/checkit-contract-classifier-core-synthetic-v1",
         pattern=r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$",
     )
     classifier_revision: str = Field(
-        default="aedfc58fa73fe5bc58a4e66a0cadaeef091fe59e",
+        default="7fb6bc333b01919d7e59c1937e9457266d574cbe",
         pattern=r"^[0-9a-f]{40}$",
     )
     classifier_device: Literal["auto", "cpu", "cuda", "mps"] = "cpu"

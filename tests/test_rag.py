@@ -90,11 +90,11 @@ def test_missing_labels_runs_classifier_then_clause_search():
         def predict(self, text):
             assert text == "월 급여는 매월 25일 지급한다."
             return {
-                "model_id": "rladmsgki/checkit-contract-classifier",
-                "revision": "aedfc58fa73fe5bc58a4e66a0cadaeef091fe59e",
+                "model_id": "hur03/checkit-contract-classifier-core-synthetic-v1",
+                "revision": "7fb6bc333b01919d7e59c1937e9457266d574cbe",
                 "max_length": 256,
                 "labels": ["임금"],
-                "scores": [{"label": "임금", "score": 0.989, "threshold": 0.35}],
+                "scores": [{"label": "임금", "score": 0.9077, "threshold": 0.5}],
             }
 
     class ClauseService:
@@ -115,7 +115,7 @@ def test_missing_labels_runs_classifier_then_clause_search():
         })
         assert response.status_code == 200
         assert response.json()["labels"] == ["임금"]
-        assert response.json()["classification"]["scores"][0]["threshold"] == 0.35
+        assert response.json()["classification"]["scores"][0]["threshold"] == 0.5
 
 
 def test_empty_model_labels_are_preserved_and_search_without_label_priority():

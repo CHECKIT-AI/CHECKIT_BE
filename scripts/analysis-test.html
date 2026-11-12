@@ -14,11 +14,12 @@
   .page { border-top: 1px solid #bbb; margin-top: 1rem; }
 </style>
 <h1>계약서 분석 테스트</h1>
-<p>인증을 마친 회원 계정으로 로그인하세요. <a href="/api/auth/oauth/test">소셜 로그인</a> · <a href="/docs">API 문서</a></p>
+<p>인증을 마친 회원 계정으로 로그인하세요. 새 계정은 아래에서 가입한 뒤 <a href="/dev/email-verification">메일 인증</a>을 완료하세요. <a href="/api/auth/oauth/test">소셜 로그인</a> · <a href="/docs">API 문서</a></p>
 <form id="email-login">
   <label>이메일 <input id="email" type="email" autocomplete="username" required></label>
   <label>비밀번호 <input id="password" type="password" autocomplete="current-password" required></label>
   <button type="submit">이메일 로그인</button>
+  <button id="signup" type="button">새 계정 회원가입</button>
 </form>
 <p>파일은 브라우저에서만 읽습니다. OCR 결과를 원본과 대조하고 이름·주소·연락처·계좌번호 등 식별정보를 직접 가리세요. 임금·시간·날짜는 판단에 필요합니다. 전송한 텍스트와 분석 결과는 회원 계약서 기록으로 DB에 남습니다.</p>
 <label>PDF 한 개 또는 순서대로 정렬된 JPG·PNG 최대 10장
@@ -60,6 +61,25 @@
     } finally {
       $("password").value = "";
       button.disabled = false;
+    }
+  };
+  $("signup").onclick = async () => {
+    const email = $("email");
+    const password = $("password");
+    if (!email.reportValidity() || !password.value || password.value.length < 12) {
+      return status("새 비밀번호는 12자 이상으로 입력하세요.");
+    }
+    $("signup").disabled = true;
+    try {
+      await request("/api/auth/signup", {method: "POST", headers: {
+        "Content-Type": "application/json", "X-CSRF-Token": await csrf()
+      }, body: JSON.stringify({email: email.value, password: password.value})});
+      status("가입 가능한 이메일이라면 인증 메일이 전송됩니다. 메일의 링크를 열어 인증을 완료하세요.");
+    } catch (error) {
+      status(error.message);
+    } finally {
+      password.value = "";
+      $("signup").disabled = false;
     }
   };
   let inputKind = null;

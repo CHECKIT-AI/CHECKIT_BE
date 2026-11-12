@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -24,6 +25,8 @@ from app.oauth import OAuthCallbackRedactionMiddleware, router as oauth_router
 from app.oauth_providers import ProviderClient
 from app.oauth_state import OAuthStateStore
 from app.rag import LocalSearch, router as rag_router
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
@@ -88,6 +91,8 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
                 async for chunk in request.stream():
                     body.extend(chunk)
                     if len(body) > body_limit:
+                        if request.url.path.startswith("/api/analysis"):
+                            logger.warning("Analysis request rejected: reason=body_too_large")
                         return JSONResponse(status_code=413, content=APIError(
                             413, "REQUEST_TOO_LARGE", "요청 크기가 너무 큽니다."
                         ).content())
@@ -99,16 +104,29 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
 
     @application.exception_handler(APIError)
     async def api_error(request, exc):
+        if request.url.path.startswith("/api/analysis"):
+            route = request.scope.get("route")
+            logger.warning("Analysis API rejected: endpoint=%s status=%d error_code=%s",
+                           getattr(route, "name", "unknown"), exc.status, exc.code)
         return JSONResponse(status_code=exc.status, content=exc.content())
 
     @application.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
         # Pydantic's default input field can echo passwords/email verification tokens.
+        if request.url.path.startswith("/api/analysis"):
+            route = request.scope.get("route")
+            logger.warning("Analysis API validation failed: endpoint=%s",
+                           getattr(route, "name", "unknown"))
         return JSONResponse(status_code=422, content=APIError(
             422, "INVALID_INPUT", "요청 필드와 형식을 확인하세요."
         ).content())
 
     async def database_error(request, exc):
+        if request.url.path.startswith("/api/analysis"):
+            route = request.scope.get("route")
+            logger.error("Analysis database request failed: endpoint=%s error_type=%s sqlstate=%s",
+                         getattr(route, "name", "unknown"), type(exc).__name__,
+                         getattr(exc, "sqlstate", None))
         return JSONResponse(status_code=503, content=APIError(
             503, "DATABASE_UNAVAILABLE", "데이터베이스 요청을 처리할 수 없습니다.", retryable=True
         ).content())

@@ -126,6 +126,7 @@ POST 요청에 사용할 보안 토큰을 발급합니다.
 입력: 목록에서 얻은 contract_id(UUID). 회원 쿠키 필요. 본문 없음.
 응답: contract, files, pages, text, current_result. 없는 텍스트/결과는 null.
 is_current_generation/is_current_revision이 false면 이전 입력 기준 결과입니다.
+current_result.items의 document_presence는 계약서 기재 여부, status는 법령 근거 검증 후 최종 판단입니다.
 """, errors=(401, 404, 422, 503)),
 }
 

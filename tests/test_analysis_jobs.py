@@ -71,6 +71,7 @@ def test_job_api_creates_owned_job_and_exposes_status(monkeypatch):
         assert state.json()["result"] is None
         schema = client.get("/openapi.json").json()
         assert f"/api/analysis/contracts/{{contract_id}}/jobs" in schema["paths"]
+        assert "document_presence" in schema["components"]["schemas"]["CheckItemOutput"]["properties"]
 
 
 def test_development_analysis_page_serves_browser_only_ocr():
@@ -81,6 +82,7 @@ def test_development_analysis_page_serves_browser_only_ocr():
         assert 'application/pdf,image/jpeg,image/png' in response.text
         assert '"/api/contracts"' in response.text
         assert '"/api/auth/login"' in response.text
+        assert '"/api/auth/signup"' in response.text
 
 
 def test_job_rejects_unconfirmed_revision(monkeypatch):
@@ -117,6 +119,66 @@ def test_citations_require_official_source_and_applicable_effective_date():
     assert not jobs._verified_citations(["law:1"], [hit], jobs.date(2026, 1, 1))
     hit["metadata"]["source_url"] = "https://example.com/law"
     assert not jobs._verified_citations(["law:1"], [hit], jobs.date(2026, 11, 9))
+
+
+def test_missing_candidate_keeps_document_presence_separate_from_law_status():
+    candidate = {"category": "MISSING", "required_information": ["임금 계산 방법"],
+                 "source_locations": []}
+    clauses = {"c1": {"clause_id": "c1", "page": 2, "text": "월급 250만원"}}
+    answer = Judgment(status="PRESENT", explanation="임금 계산 방법이 누락되어 있습니다.",
+                      document_presence="PRESENT", document_quote="월급 250만원",
+                      document_clause_id="c1", citation_chunk_ids=["law:1"])
+    jobs._resolve_missing(candidate, answer, clauses, True)
+    assert answer.status == "PRESENT"
+    assert "누락" not in answer.explanation
+    assert candidate["source_locations"] == [{"clause_id": "c1", "page": 2}]
+
+    answer = Judgment(status="PRESENT", explanation="기재되어 있습니다.",
+                      document_presence="ABSENT", citation_chunk_ids=["law:1"])
+    jobs._resolve_missing(candidate, answer, clauses, True)
+    assert answer.status == "MISSING_SUSPECTED"
+    assert "찾지 못했습니다" in answer.explanation
+    assert candidate["source_locations"] == []
+
+    answer = Judgment(status="PRESENT", explanation="기재되어 있습니다.",
+                      document_presence="PRESENT", document_quote="월급 250만원",
+                      document_clause_id="c1", citation_chunk_ids=["law:1"])
+    jobs._resolve_missing(candidate, answer, clauses, False)
+    assert answer.status == "NEEDS_CONFIRMATION"
+    assert answer.document_presence == "PRESENT"
+    assert answer.citation_chunk_ids == []
+
+
+def test_saved_item_has_separate_presence_and_exact_document_quote():
+    class SaveConn:
+        def execute(self, sql, args):
+            if "FROM checkit.contracts" in sql:
+                self.row = {"current_file_generation_id": GENERATION_ID, "deletion_state": "AVAILABLE"}
+            elif "FROM checkit.text_revisions" in sql:
+                self.row = {"id": REVISION_ID}
+            elif "INSERT INTO checkit.analysis_results" in sql:
+                self.row = {"id": CONTRACT_ID}
+            elif "INSERT INTO checkit.check_items" in sql:
+                self.item_sql, self.item_args = sql, args
+                self.row = {"id": CONTRACT_ID}
+            else:
+                self.row = None
+            return self
+        def fetchone(self): return self.row
+
+    conn = SaveConn()
+    candidate = {"check_code": "MISSING_HOLIDAY", "category": "MISSING", "labels": ["휴일"],
+                 "quoted_text": None, "source_locations": [{"clause_id": "c1", "page": 1}]}
+    answer = Judgment(status="PRESENT", explanation="계약서에서 휴일 관련 문구를 확인했습니다.",
+                      document_presence="PRESENT", document_quote="매주 일요일은 휴일",
+                      document_clause_id="c1")
+    jobs._save_result(conn, {"id": CONTRACT_ID, "contract_id": CONTRACT_ID,
+                             "file_generation_id": GENERATION_ID, "input_revision_id": REVISION_ID},
+                      [{"clause_id": "c1"}], [], [(candidate, answer, [])],
+                      "employment_basic_v004", "gemini-test")
+    assert "document_presence" in conn.item_sql
+    assert conn.item_args[4:6] == ("PRESENT", "매주 일요일은 휴일")
+    assert conn.item_args[8].obj == [{"clause_id": "c1", "page": 1}]
 
 
 class WorkerConn:
@@ -164,7 +226,7 @@ def test_worker_reviews_all_candidates_once_and_saves_only_after_judgment(monkey
     saved = []
 
     class Reviewer:
-        def judge(self, clauses, reviews, context):
+        def judge(self, clauses, reviews, context, correlation_id=None):
             reviewed.append((clauses, reviews))
             return {candidate["candidate_id"]: Judgment(
                 status="NEEDS_CONFIRMATION", explanation="확인 필요",
@@ -194,7 +256,7 @@ def test_worker_saves_discovered_issue_as_needs_confirmation_without_verified_la
     saved = []
 
     class Reviewer:
-        def judge(self, clauses, reviews, context):
+        def judge(self, clauses, reviews, context, correlation_id=None):
             answers = {candidate["candidate_id"]: Judgment(
                 status="NEEDS_CONFIRMATION", explanation="확인 필요") for candidate, _ in reviews}
             answers["scan_0001"].findings = [Finding(
@@ -242,7 +304,7 @@ def test_empty_result_summary_does_not_claim_contract_is_safe():
 
 def test_worker_records_sanitized_failure_code(monkeypatch):
     class Reviewer:
-        def judge(self, clauses, reviews, context):
+        def judge(self, clauses, reviews, context, correlation_id=None):
             raise LLMUnavailable("provider secret details")
 
     app = SimpleNamespace(state=SimpleNamespace(
@@ -258,7 +320,7 @@ def test_worker_records_sanitized_failure_code(monkeypatch):
 
 def test_worker_reports_unsplittable_input_without_retry(monkeypatch):
     class Reviewer:
-        def judge(self, clauses, reviews, context):
+        def judge(self, clauses, reviews, context, correlation_id=None):
             raise LLMInputTooLarge("provider details")
 
     app = SimpleNamespace(state=SimpleNamespace(

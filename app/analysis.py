@@ -1,5 +1,6 @@
 """OCR-bypass contract analysis orchestration through classification and law retrieval."""
 
+import logging
 import re
 from typing import Literal
 from uuid import UUID
@@ -16,6 +17,7 @@ from app.privacy import has_direct_identifier
 
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
+logger = logging.getLogger(__name__)
 
 MAX_CLAUSE_LENGTH = 2000
 MAX_CLAUSES = 100
@@ -138,13 +140,15 @@ def stored_clauses(contract_id: UUID, content: str, blocks: list | None = None) 
         isinstance(block, dict) and set(block) == {"page", "start", "end"}
         for block in blocks
     ) else [{"page": None, "start": 0, "end": len(content)}]
-    parts = [(block["page"], text) for block in page_ranges
-             for text in split_page_clauses(content[block["start"]:block["end"]])]
+    parts = [(block["page"], ordinal, text) for block in page_ranges
+             for ordinal, text in enumerate(
+                 split_page_clauses(content[block["start"]:block["end"]]), 1)]
     if (len(content) > MAX_DOCUMENT_LENGTH or len(parts) > MAX_CLAUSES
-            or any(len(text) > MAX_CLAUSE_LENGTH for _, text in parts)):
+            or any(len(text) > MAX_CLAUSE_LENGTH for _, _, text in parts)):
         raise APIError(422, "ANALYSIS_INPUT_LIMIT", "확정 원문의 조항 수 또는 조항 길이를 줄여 주세요.")
-    return [{"clause_id": f"{contract_id}:c{i:04d}", "page": page, "text": text}
-            for i, (page, text) in enumerate(parts, 1)]
+    return [{"clause_id": f"{contract_id}:c{i:04d}", "page": page,
+             "ordinal_on_page": ordinal, "text": text}
+            for i, (page, ordinal, text) in enumerate(parts, 1)]
 
 
 def analysis_actor(request: Request):
@@ -169,9 +173,11 @@ def analysis_actor(request: Request):
 def analyze_contract_text(body: ContractTextAnalysisInput, request: Request,
                           actor=Depends(analysis_actor)):
     request.app.state.auth_limiter.check(f"analysis:{actor.kind}:{actor.id}", limit=10)
+    logger.info("Text analysis started: page_count=%d", len(body.pages))
     if any(has_direct_identifier(page.text) for page in body.pages):
         raise APIError(422, "PERSONAL_DATA_DETECTED", "개인정보를 가린 뒤 다시 확인해 주세요.")
     clauses = split_contract(body.contract_id, body.pages)
+    logger.info("Text analysis clauses prepared: clause_count=%d", len(clauses))
     analyzed = []
     label_coverage = set()
     for clause in clauses:
@@ -199,6 +205,7 @@ def analyze_contract_text(body: ContractTextAnalysisInput, request: Request,
                 "law_candidates": candidates,
             },
         })
+    logger.info("Text analysis completed: clause_count=%d", len(analyzed))
     return {
         "contract_id": body.contract_id, "input_mode": "OCR_BYPASS_TEXT",
         "stages_completed": ["OCR_SKIPPED", "CLAUSE_COMPLETE", "CLASSIFICATION_COMPLETE", "RETRIEVAL_COMPLETE"],

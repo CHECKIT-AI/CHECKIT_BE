@@ -1,6 +1,7 @@
 """Persisted, member-owned employment contract analysis jobs."""
 
-from datetime import date
+from datetime import date, datetime
+import logging
 from typing import Literal
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
@@ -20,6 +21,7 @@ from app.privacy import has_direct_identifier
 router = APIRouter(prefix="/api/analysis/contracts", tags=["analysis"])
 MAX_CANDIDATES = 50
 MAX_DISCOVERIES = 50
+logger = logging.getLogger(__name__)
 
 
 class JobInput(BaseModel):
@@ -43,7 +45,32 @@ class JobStatus(BaseModel):
     status: str
     stage: str | None
     error_code: str | None
-    result: dict | None
+    result: "AnalysisResultOutput | None"
+
+
+class CheckItemOutput(BaseModel):
+    id: UUID
+    check_code: str
+    labels: list[str]
+    status: str
+    document_presence: Literal["PRESENT", "ABSENT", "UNCLEAR"] | None
+    quoted_text: str | None
+    explanation: str
+    required_information: list[str]
+    source_locations: list[dict]
+    rule_candidate: dict
+
+
+class AnalysisResultOutput(BaseModel):
+    id: UUID
+    summary: str
+    completed_at: datetime
+    model_versions: dict
+    prompt_version: str | None
+    corpus_version: str
+    rule_version: str | None
+    items: list[CheckItemOutput]
+    citations: list[dict]
 
 
 def _revision(conn, contract_id, generation):
@@ -82,7 +109,7 @@ def create_job(body: JobInput, background: BackgroundTasks, request: Request,
         raise APIError(409, "ANALYSIS_INPUT_UNAVAILABLE", "현재 세대의 확정 원문이 필요합니다.")
     if has_direct_identifier(revision["content"]):
         raise APIError(422, "PERSONAL_DATA_DETECTED", "개인정보를 가린 뒤 다시 확인해 주세요.")
-    stored_clauses(contract_id, revision["content"], revision.get("blocks"))
+    clauses = stored_clauses(contract_id, revision["content"], revision.get("blocks"))
     context = body.model_dump(mode="json")
     job_id = uuid4()
     try:
@@ -99,6 +126,7 @@ def create_job(body: JobInput, background: BackgroundTasks, request: Request,
             raise APIError(409, "ANALYSIS_CONFLICT", "이미 분석이 진행 중입니다.") from None
         raise
     background.add_task(run_job, request.app, job_id)
+    logger.info("Analysis job queued: job_id=%s clause_count=%d", job_id, len(clauses))
     return {"job_id": job_id, "status": "QUEUED"}
 
 
@@ -127,7 +155,7 @@ def get_job(request: Request, contract_id: UUID, job_id: UUID,
         ).fetchone()
         if result:
             result["items"] = conn.execute(
-                "SELECT id,check_code,labels,status,quoted_text,explanation,required_information,source_locations,rule_candidate "
+                "SELECT id,check_code,labels,status,document_presence,quoted_text,explanation,required_information,source_locations,rule_candidate "
                 "FROM checkit.check_items WHERE result_id=%s ORDER BY created_at,id", (result["id"],),
             ).fetchall()
             result["citations"] = conn.execute(
@@ -173,6 +201,45 @@ def _verified_citations(chunk_ids, hits, effective_date):
     return True
 
 
+def _resolve_missing(candidate, answer, clauses_by_id, verified):
+    name = candidate["required_information"][0]
+    if answer.document_presence is None:
+        answer.document_presence = "UNCLEAR"
+    clause = clauses_by_id.get(answer.document_clause_id)
+    if (answer.document_presence == "PRESENT" and
+            (not clause or not answer.document_quote or
+             answer.document_quote not in clause["text"])):
+        answer.document_presence = "UNCLEAR"
+        answer.document_quote = None
+        answer.document_clause_id = None
+    if answer.document_presence == "PRESENT":
+        candidate["source_locations"] = [{"clause_id": clause["clause_id"], **(
+            {"page": clause["page"]} if clause.get("page") is not None else {})}]
+        answer.required_information = []
+    else:
+        candidate["source_locations"] = []
+        answer.document_quote = None
+        answer.document_clause_id = None
+        answer.required_information = candidate["required_information"]
+    if not verified:
+        answer.citation_chunk_ids = []
+    if answer.document_presence == "PRESENT" and verified:
+        answer.status = "PRESENT"
+        answer.explanation = f"계약서에서 {name} 관련 문구를 확인했습니다."
+    elif answer.document_presence == "ABSENT" and verified:
+        answer.status = "MISSING_SUSPECTED"
+        answer.explanation = f"계약서에서 {name} 관련 문구를 찾지 못했습니다."
+    else:
+        answer.status = "NEEDS_CONFIRMATION"
+        answer.explanation = (
+            "계약서 기재는 확인했지만 적용 법령 근거를 검증하지 못했습니다."
+            if answer.document_presence == "PRESENT" else
+            "계약서에서 관련 문구를 찾지 못했지만 적용 법령 근거를 검증하지 못했습니다."
+            if answer.document_presence == "ABSENT" else
+            "계약서 기재 여부를 확인하지 못했습니다."
+        )
+
+
 def _save_result(conn, job, clauses, classified, decisions, corpus, model):
     contract = conn.execute(
         "SELECT current_file_generation_id,deletion_state FROM checkit.contracts WHERE id=%s FOR UPDATE",
@@ -202,10 +269,12 @@ def _save_result(conn, job, clauses, classified, decisions, corpus, model):
     for candidate, answer, hits in decisions:
         item_id = conn.execute(
             "INSERT INTO checkit.check_items "
-            "(result_id,check_code,labels,status,quoted_text,explanation,required_information,source_locations,rule_candidate) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            "(result_id,check_code,labels,status,document_presence,quoted_text,explanation,required_information,source_locations,rule_candidate) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (result_id, candidate["check_code"], Jsonb(candidate["labels"]), answer.status,
-             candidate["quoted_text"], answer.explanation, Jsonb(answer.required_information),
+             answer.document_presence if candidate["category"] == "MISSING" else None,
+             answer.document_quote if candidate["category"] == "MISSING" else candidate["quoted_text"],
+             answer.explanation, Jsonb(answer.required_information),
              Jsonb(candidate["source_locations"]), Jsonb(candidate)),
         ).fetchone()["id"]
         by_id = {hit["chunk_id"]: hit for hit in hits}
@@ -236,6 +305,10 @@ def _save_result(conn, job, clauses, classified, decisions, corpus, model):
 
 def run_job(app, job_id: UUID):
     pool = app.state.database_pool
+    stage = "CLASSIFY"
+    step = "load_input"
+    step_detail = "-"
+    logger.info("Analysis job started: job_id=%s", job_id)
     try:
         with pool.connection() as conn:
             job = conn.execute(
@@ -249,19 +322,37 @@ def run_job(app, job_id: UUID):
             if not revision or revision["id"] != job["input_revision_id"]:
                 raise APIError(409, "ANALYSIS_STALE_INPUT", "분석 중 계약서 입력이 변경되었습니다.")
             clauses = stored_clauses(job["contract_id"], revision["content"], revision.get("blocks"))
-        classified = [app.state.classifier.predict(clause["text"]) for clause in clauses]
+        logger.info("Analysis input loaded: job_id=%s clause_count=%d", job_id, len(clauses))
+        step = "classify"
+        logger.info("Analysis classification started: job_id=%s clause_count=%d", job_id, len(clauses))
+        classified = []
+        for index, clause in enumerate(clauses, 1):
+            step_detail = f"clause_{index}"
+            classified.append(app.state.classifier.predict(clause["text"]))
+        step_detail = "-"
+        logger.info("Analysis classification completed: job_id=%s classified_count=%d",
+                    job_id, len(classified))
+        step = "candidate_generation"
         found = candidates(clauses, classified, job["analysis_context"])
+        step_detail = "-"
+        logger.info("Analysis candidates generated: job_id=%s candidate_count=%d",
+                    job_id, len(found))
         if len(found) > MAX_CANDIDATES:
             raise APIError(422, "ANALYSIS_INPUT_LIMIT", "문제 후보 수가 분석 제한을 초과했습니다.")
-        _stage(pool, job_id, "RETRIEVE")
+        stage = "RETRIEVE"
+        step = "clause_retrieval"
+        _stage(pool, job_id, stage)
         reviewer = app.state.gemini_reviewer
         reviews = []
         corpus = app.state.settings.rag_corpus
         top_k = job["analysis_context"]["top_k"]
         clause_hits = {}
+        law_hit_count = 0
         for index, (clause, classification) in enumerate(zip(clauses, classified), 1):
+            step_detail = f"clause_{index}"
             retrieved = app.state.rag_search.search_clause(
                 clause["clause_id"], clause["text"], classification["labels"], top_k)
+            law_hit_count += len(retrieved["results"])
             corpus = retrieved["corpus"]
             clause_hits[clause["clause_id"]] = retrieved
             reviews.append(({
@@ -270,8 +361,11 @@ def run_job(app, job_id: UUID):
                 "explanation": "이 조항에서 추가 문제를 검토합니다.", "required_information": [],
                 "retrieval_warnings": retrieved.get("warnings", []),
             }, retrieved["results"]))
+        step = "document_retrieval"
+        step_detail = "document_scan"
         document_search = app.state.rag_search.search(
             "근로계약서 필수 근로조건 명시 임금 근로시간 휴일 연차 근무 장소 업무", top_k)
+        law_hit_count += len(document_search["results"])
         reviews.append(({
             "candidate_id": "scan_document", "category": "DOCUMENT_SCAN",
             "clause_id": None, "check_code": "DISCOVERED_MISSING",
@@ -279,14 +373,27 @@ def run_job(app, job_id: UUID):
             "required_information": [], "retrieval_warnings": document_search.get("warnings", []),
         }, document_search["results"]))
         for index, candidate in enumerate(found, 1):
+            step = "candidate_retrieval"
+            step_detail = f"candidate_{index}"
             retrieved = (clause_hits[candidate["clause_id"]] if candidate["clause_id"]
                          else _law_hits(app.state.rag_search, candidate, top_k))
+            if not candidate["clause_id"]:
+                law_hit_count += len(retrieved["results"])
             corpus = retrieved["corpus"]
             reviews.append(({**candidate, "candidate_id": f"candidate_{index:04d}",
                              "retrieval_warnings": retrieved.get("warnings", [])},
                             retrieved["results"]))
-        _stage(pool, job_id, "EVALUATE")
-        answers = reviewer.judge(clauses, reviews, job["analysis_context"])
+        logger.info("Analysis retrieval completed: job_id=%s clause_search_count=%d review_count=%d law_hit_count=%d",
+                    job_id, len(clauses), len(reviews), law_hit_count)
+        stage = "EVALUATE"
+        step = "gemini_evaluation"
+        step_detail = "-"
+        _stage(pool, job_id, stage)
+        logger.info("Analysis evaluation started: job_id=%s review_count=%d", job_id, len(reviews))
+        answers = reviewer.judge(clauses, reviews, job["analysis_context"], str(job_id))
+        logger.info("Analysis evaluation completed: job_id=%s answer_count=%d",
+                    job_id, len(answers))
+        step = "result_validation"
         decisions = []
         discovery_count = 0
         clauses_by_id = {clause["clause_id"]: clause for clause in clauses}
@@ -316,6 +423,11 @@ def run_job(app, job_id: UUID):
             effective = job["analysis_context"].get("effective_date")
             verified = bool(effective and answer.citation_chunk_ids and
                             _verified_citations(answer.citation_chunk_ids, hits, date.fromisoformat(effective)))
+            if candidate["category"] == "MISSING":
+                _resolve_missing(candidate, answer, clauses_by_id,
+                                 bool(verified and date.fromisoformat(effective).year == 2026))
+                decisions.append((candidate, answer, hits))
+                continue
             if candidate["category"] == "DISADVANTAGE" and not verified:
                 answer.citation_chunk_ids = []
             if candidate["category"] != "DISADVANTAGE" and (
@@ -337,12 +449,18 @@ def run_job(app, job_id: UUID):
                 answer.explanation = "적용 시점과 법령 근거를 검증할 수 없어 판단을 보류합니다. " + answer.explanation
             else:
                 answer.status = "MISSING_SUSPECTED" if candidate["category"] == "MISSING" else "CAUTION"
+        step = "persist_result"
         with pool.connection() as conn:
             _save_result(conn, job, clauses, classified, decisions, corpus, app.state.settings.gemini_model)
+        logger.info("Analysis job succeeded: job_id=%s clause_count=%d item_count=%d",
+                    job_id, len(clauses), len(decisions))
     except Exception as exc:
         code = (exc.code if isinstance(exc, APIError) else "ANALYSIS_INPUT_LIMIT"
                 if isinstance(exc, LLMInputTooLarge) else "LLM_UNAVAILABLE"
                 if isinstance(exc, LLMUnavailable) else "ANALYSIS_FAILED")
+        logger.warning("Analysis job failed: job_id=%s stage=%s step=%s step_detail=%s error_code=%s error_type=%s sqlstate=%s",
+                       job_id, stage, step, step_detail, code, type(exc).__name__,
+                       getattr(exc, "sqlstate", None))
         recovery = "NONE" if code == "ANALYSIS_INPUT_LIMIT" else "RETRY"
         try:
             with pool.connection() as conn:
@@ -350,14 +468,17 @@ def run_job(app, job_id: UUID):
                     "UPDATE checkit.analysis_jobs SET status='FAILED',error_code=%s,recovery_action=%s,finished_at=now() "
                     "WHERE id=%s AND status IN ('QUEUED','RUNNING')", (code, recovery, job_id),
                 )
-        except Exception:
-            pass
+        except Exception as update_error:
+            logger.error("Analysis job failure state could not be saved: job_id=%s error_type=%s",
+                         job_id, type(update_error).__name__)
 
 
 def recover_interrupted_jobs(pool):
     with pool.connection() as conn:
-        conn.execute(
+        result = conn.execute(
             "UPDATE checkit.analysis_jobs SET status='FAILED',error_code='ANALYSIS_INTERRUPTED',"
             "recovery_action='RETRY',finished_at=now() "
             "WHERE kind='ANALYSIS' AND status IN ('QUEUED','RUNNING')",
         )
+        if result.rowcount:
+            logger.warning("Interrupted analysis jobs recovered: count=%d", result.rowcount)

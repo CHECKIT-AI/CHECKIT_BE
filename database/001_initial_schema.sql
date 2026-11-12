@@ -206,6 +206,7 @@ CREATE TABLE checkit.check_items (
     status text NOT NULL CHECK (status IN (
         'CAUTION', 'MISSING_SUSPECTED', 'NEEDS_CONFIRMATION', 'PRESENT'
     )),
+    document_presence text CHECK (document_presence IN ('PRESENT', 'ABSENT', 'UNCLEAR')),
     quoted_text text,
     explanation text NOT NULL CHECK (btrim(explanation) <> ''),
     required_information jsonb NOT NULL DEFAULT '[]'::jsonb

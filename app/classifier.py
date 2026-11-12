@@ -1,6 +1,7 @@
 """Authenticated contract-clause classification backed by a pinned Hugging Face model."""
 
 import json
+import logging
 from threading import Lock
 
 from fastapi import APIRouter, Depends, Request
@@ -12,6 +13,7 @@ from app.api_docs import error_response
 from app.errors import APIError
 
 router = APIRouter(prefix="/api/classifier", tags=["classifier"])
+logger = logging.getLogger(__name__)
 
 
 class ClassificationInput(BaseModel):
@@ -128,14 +130,19 @@ class LocalClassifier:
 
     def predict(self, text):
         if not self.settings.classifier_enabled:
+            logger.warning("Classifier unavailable: reason=disabled")
             raise APIError(503, "CLASSIFIER_DISABLED", "분류 기능을 활성화해야 합니다.")
         if not self.lock.acquire(blocking=False):
+            logger.warning("Classifier unavailable: reason=busy")
             raise APIError(503, "CLASSIFIER_BUSY", "분류 처리 중입니다. 잠시 후 다시 시도하세요.", retryable=True)
         try:
             if self.service is None:
                 try:
+                    logger.info("Classifier model loading started")
                     self.service = HuggingFaceClassifier(self.settings)
-                except Exception:
+                    logger.info("Classifier model loading completed")
+                except Exception as exc:
+                    logger.error("Classifier model loading failed: error_type=%s", type(exc).__name__)
                     raise APIError(
                         503, "CLASSIFIER_UNAVAILABLE", "분류 모델 준비 상태를 확인하세요."
                     ) from None
@@ -143,7 +150,8 @@ class LocalClassifier:
                 return self.service.predict(text)
             except APIError:
                 raise
-            except Exception:
+            except Exception as exc:
+                logger.error("Classifier inference failed: error_type=%s", type(exc).__name__)
                 raise APIError(
                     503, "CLASSIFIER_UNAVAILABLE", "분류 요청을 처리할 수 없습니다.", retryable=True
                 ) from None

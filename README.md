@@ -6,7 +6,7 @@ FastAPI + Supabase PostgreSQL 기반 계약서 분석 백엔드입니다.
 
 - **회원 전용:** 계약서 조회와 RAG 검색은 유효한 회원 세션이 필요합니다. 임시 사용자 세션과 기록 귀속 API는 제공하지 않습니다.
 
-- **조항 분류:** 고정 커밋의 `hur03/checkit-contract-classifier-core-synthetic-v1`을 프로세스당 한 번 로드하고 `POST /api/classifier/predict`로 10개 멀티라벨을 반환합니다.
+- **조항 분류:** 고정 커밋의 `hur03/checkit-contract-classifier-core-synthetic-3epoch-v2`을 프로세스당 한 번 로드하고 `POST /api/classifier/predict`로 10개 멀티라벨을 반환합니다.
 - **분류→검색 연결:** `POST /api/rag/search`의 조항 입력에서 `labels`를 생략하면 분류 모델을 실행한 뒤 같은 원문과 예측 라벨로 검색합니다. 명시적 라벨과 기존 `query` 입력도 유지합니다.
 - **검색 대상:** `employment_basic_v004`, **503청크**. 원문으로 전체 인덱스의 후보를 찾고 라벨로 작은 우선순위만 부여하며, 원문 금액·시간·날짜를 보존합니다.
 - **응답 연결:** 조항 ID·라벨·정책 버전과 근거별 원문·출처·기본 순위·라벨 반영 정보를 반환합니다. 미수집 연도 고시는 `warnings`로 알립니다.
@@ -94,13 +94,13 @@ py -3.13 -m venv .venv
 
 ```dotenv
 CHECKIT_CLASSIFIER_ENABLED=true
-CHECKIT_CLASSIFIER_MODEL_ID=hur03/checkit-contract-classifier-core-synthetic-v1
-CHECKIT_CLASSIFIER_REVISION=7fb6bc333b01919d7e59c1937e9457266d574cbe
+CHECKIT_CLASSIFIER_MODEL_ID=hur03/checkit-contract-classifier-core-synthetic-3epoch-v2
+CHECKIT_CLASSIFIER_REVISION=1accf527c060396c5801b044e2cebf8bedb5ac12
 CHECKIT_CLASSIFIER_DEVICE=cpu
 CHECKIT_CLASSIFIER_MAX_LENGTH=256
 ```
 
-현재 모델은 [CheckIt KLUE-RoBERTa 공개 모델](https://huggingface.co/hur03/checkit-contract-classifier-core-synthetic-v1)이며, core train 3,470개와 합성 문장 240개로 학습했습니다. 고정된 revision은 위 설정값을 따릅니다. 446개 core test에서 micro F1 0.858, macro F1 0.829를 기록했으며, 합성 라벨은 미검수이므로 이 수치를 운영 성능이나 법률 판단 정확도로 해석하지 않습니다.
+현재 모델은 [CheckIt KLUE-RoBERTa 공개 모델](https://huggingface.co/hur03/checkit-contract-classifier-core-synthetic-3epoch-v2)이며, core train 3,470개와 합성 문장 240개로 3 epoch 학습했습니다. 고정된 revision은 위 설정값을 따릅니다. 446개 core test에서 micro F1 0.860, macro F1 0.849를 기록했으며, 합성 라벨은 미검수이므로 이 수치를 운영 성능이나 법률 판단 정확도로 해석하지 않습니다.
 
 회원 로그인과 CSRF 발급 후 `POST /api/classifier/predict`를 호출합니다.
 
@@ -121,6 +121,7 @@ CHECKIT_CLASSIFIER_MAX_LENGTH=256
 ## 저장된 근로계약서 규칙·Gemini 분석
 
 현재 세대에 **확정된 마스킹 텍스트 revision**이 있는 `EMPLOYMENT` 계약서만 분석합니다. 브라우저가 OCR·마스킹을 수행하고, `POST /api/contracts`는 확인된 텍스트만 저장합니다. 원본 업로드·서버 OCR은 없습니다. 기존 DB에 `database/004_analysis_context.sql`이 이미 적용되어 있다면 다시 실행하지 않습니다. 초기 스키마나 역할 프로비저닝 SQL은 재실행하지 않습니다.
+기존 DB에는 `database/005_document_presence.sql`을 한 번 적용한 뒤 새 분석 코드를 실행합니다.
 
 분류와 RAG를 활성화하고 서버 전용 Gemini 키를 설정합니다. RAG 인덱스와 모델 준비는 아래 절을 따릅니다.
 
@@ -140,9 +141,11 @@ CHECKIT_GEMINI_TIMEOUT_SECONDS=60
 
 `202` 응답의 `job_id`로 `GET /api/analysis/contracts/{contract_id}/jobs/{job_id}`를 조회합니다. `SUCCEEDED`면 `result.items`에 JSON 판단이, `result.citations`에 실제 인용된 RAG 청크가 들어갑니다. 계약서 상세 조회의 `current_result`에도 최신 결과가 반영됩니다. `FAILED`면 `error_code`를 보고 재요청할 수 있습니다. 동일 계약서의 동시 분석은 `409 ANALYSIS_CONFLICT`입니다. 서버 재시작으로 중단된 job은 실패 처리합니다.
 
-모든 조항과 문서 전체 누락 점검을 위해 RAG를 검색하고, 규칙 후보의 근거도 함께 Gemini에 보통 한 번 요청합니다. 결과는 후보 ID와 인용 ID를 검증하며 모델 입력·출력 한도를 넘을 때만 분할합니다. 모델이 새로 제안한 문제는 `rule_candidate.source=GEMINI`로 구분합니다. 적용 시점·법령 근거를 검증할 수 없으면 `NEEDS_CONFIRMATION`으로 저장합니다. 법령 원문을 임의 길이로 자르지 않으며, 토큰 사용량과 비용은 아직 실측하지 않았습니다.
+`result.items[].document_presence`는 계약서 기재 사실(`PRESENT`/`ABSENT`/`UNCLEAR`)이고, 기존 `status`는 법령 적용과 인용까지 검증한 최종 상태입니다. 기존 결과와 추가 발견 항목은 `document_presence: null`일 수 있습니다. `PRESENT`인 기재 항목의 `quoted_text`는 원문의 정확한 부분 문자열이고 `source_locations`에 위치가 들어갑니다. `NEEDS_CONFIRMATION`이어도 `document_presence: PRESENT`라면 문구는 발견했지만 법령 판단을 보류한 것입니다. `rule_candidate.status_hint`는 최종 판단이 아닙니다.
 
-개발 환경에서는 [`/dev/analysis-test`](http://localhost:8000/dev/analysis-test)에서 PDF 또는 JPG·PNG를 브라우저에서 읽고 텍스트를 직접 수정·마스킹한 뒤 기존 회원 인증·DB 분석 경로를 테스트할 수 있습니다. 파일 원본은 서버로 전송하지 않습니다. 로그인과 분류·RAG·Gemini 설정이 필요하며, 전송한 텍스트와 결과는 회원 기록으로 남습니다. PDF/OCR 라이브러리와 한국어 모델은 브라우저가 CDN에서 내려받으므로 첫 실행에는 네트워크가 필요합니다. 실제 계약서 사용 전 모든 페이지를 원본과 대조하고 개인정보를 가리세요.
+모든 조항과 문서 전체 누락 점검을 위해 RAG를 검색하고, 규칙 후보의 근거도 함께 Gemini에 보통 한 번 요청합니다. 후보 ID를 검증하고 후보에 허용되지 않은 인용 ID는 버립니다. 해당 법령 판단은 `NEEDS_CONFIRMATION`으로 남기며 다른 항목은 계속 처리합니다. 모델 입력·출력 한도를 넘을 때만 요청을 분할합니다. 모델이 새로 제안한 문제는 `rule_candidate.source=GEMINI`로 구분합니다. 적용 시점·법령 근거를 검증할 수 없으면 `NEEDS_CONFIRMATION`으로 저장합니다. 법령 원문을 임의 길이로 자르지 않으며, 토큰 사용량과 비용은 아직 실측하지 않았습니다.
+
+개발 환경에서는 [`/dev/analysis-test`](http://localhost:8000/dev/analysis-test)에서 이메일 회원가입·로그인 후 PDF 또는 JPG·PNG를 브라우저에서 읽고 텍스트를 직접 수정·마스킹한 뒤 기존 회원 인증·DB 분석 경로를 테스트할 수 있습니다. 파일 원본은 서버로 전송하지 않습니다. 분류·RAG·Gemini 설정이 필요하며, 전송한 텍스트와 결과는 회원 기록으로 남습니다. PDF/OCR 라이브러리와 한국어 모델은 브라우저가 CDN에서 내려받으므로 첫 실행에는 네트워크가 필요합니다. 실제 계약서 사용 전 모든 페이지를 원본과 대조하고 개인정보를 가리세요.
 
 규칙은 필수 근로조건 누락, 위약금 예정, 명시적 최저임금 미달, 가산수당 배제, 휴게시간 부족의 **후보**와 계약상 불리함 후보를 찾습니다. 2026년 시급 기준은 [최저임금위원회 고시 현황](https://minimumwage.go.kr/minWage/policy/decisionMain.do)의 10,320원입니다. 다른 연도나 법령 근거가 확인되지 않으면 법적 판단은 `NEEDS_CONFIRMATION`으로 남깁니다. 마스킹된 원문과 법령은 Gemini API로 전송되며 모델 응답은 스키마와 인용 ID를 검증한 뒤에만 저장합니다. 현재 비동기 실행은 단일 서버 worker의 프로세스 내 BackgroundTasks를 사용합니다.
 

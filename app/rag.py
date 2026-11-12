@@ -1,4 +1,5 @@
 """Local Data package adapter and authenticated retrieval route."""
+import logging
 from threading import Lock
 from typing import Literal
 
@@ -12,6 +13,7 @@ from app.classifier import ClassificationOutput
 from app.errors import APIError
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
+logger = logging.getLogger(__name__)
 
 
 class SearchInput(BaseModel):
@@ -101,24 +103,33 @@ class LocalSearch:
 
     def _run(self, invoke):
         if not self.settings.rag_enabled:
+            logger.warning("RAG unavailable: reason=disabled")
             raise APIError(503, "RAG_DISABLED", "검색 기능을 활성화해야 합니다.")
         if not self.lock.acquire(blocking=False):
+            logger.warning("RAG unavailable: reason=busy")
             raise APIError(503, "RAG_BUSY", "검색 처리 중입니다. 잠시 후 다시 시도하세요.", retryable=True)
         try:
             if self.service is None:
                 try:
+                    logger.info("RAG service loading started")
                     from RAG.service import LawSearchService
                     self.service = LawSearchService(
                         corpus=self.settings.rag_corpus, device=self.settings.rag_device,
                         method=self.settings.rag_method,
                     )
-                except Exception:
+                    logger.info("RAG service loading completed")
+                except Exception as exc:
+                    logger.error("RAG service loading failed: error_type=%s", type(exc).__name__)
                     raise APIError(503, "RAG_UNAVAILABLE", "Data 패키지·인덱스·모델 준비 상태를 확인하세요.") from None
             try:
-                return invoke(self.service)
-            except ValueError:
+                result = invoke(self.service)
+                logger.info("RAG search completed: result_count=%d", len(result.get("results", [])))
+                return result
+            except ValueError as exc:
+                logger.warning("RAG search rejected: error_type=%s", type(exc).__name__)
                 raise APIError(422, "RAG_INPUT_LIMIT", "모델 입력 제한을 확인하고 검색 문장을 줄여 주세요.") from None
-            except Exception:
+            except Exception as exc:
+                logger.error("RAG search failed: error_type=%s", type(exc).__name__)
                 raise APIError(503, "RAG_UNAVAILABLE", "검색 요청을 처리할 수 없습니다.", retryable=True) from None
         finally:
             self.lock.release()

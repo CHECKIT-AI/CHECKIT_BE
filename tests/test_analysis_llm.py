@@ -4,7 +4,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from app.analysis_llm import GeminiReviewer, LLMInputTooLarge, LLMUnavailable
+from app.analysis_llm import GeminiReviewer, LLMInputTooLarge, LLMUnavailable, PROMPT_VERSION
 from app.config import Settings
 
 
@@ -30,7 +30,9 @@ def result_for(candidate_ids, citations=None):
     return {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": json.dumps({
         "items": [{"candidate_id": candidate_id, "status": "NEEDS_CONFIRMATION",
                    "explanation": "확인 필요", "required_information": [],
-                   "citation_chunk_ids": (citations or {}).get(candidate_id, []), "findings": []}
+                   "citation_chunk_ids": (citations or {}).get(candidate_id, []), "findings": [],
+                   "document_presence": "UNCLEAR" if candidate_id == "candidate_0001" else None,
+                   "document_quote": None, "document_clause_id": None}
                   for candidate_id in candidate_ids],
     })}]}}]}
 
@@ -59,6 +61,12 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     assert prompt["law_hits"][0]["content"] == "조문 원문과 예외"
     assert "irrelevant" not in prompt["law_hits"][0]["metadata"]
     assert [candidate["law_chunk_ids"] for candidate in prompt["candidates"]] == [["law:1"], ["law:1"]]
+    rules = " ".join(prompt["rules"])
+    assert PROMPT_VERSION == "employment_review_v5"
+    assert "제공된 law_hits의 실제 내용에서만" in rules
+    assert "그 candidate_id의 law_chunk_ids에 있는 ID" in rules
+    assert "근거가 없으면 finding을 만들지 마세요" in rules
+    assert "document_presence" in rules
     assert calls[0]["json"]["generationConfig"]["responseMimeType"] == "application/json"
 
 
@@ -66,7 +74,6 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     {"candidates": []},
     {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "{}"}]}}]},
     result_for(["candidate_0001"]),
-    result_for(["candidate_0001", "candidate_0002"], {"candidate_0001": ["invented"]}),
     result_for(["candidate_0001", "candidate_0001"]),
 ])
 def test_missing_duplicate_or_untrusted_answers_retry_then_fail(monkeypatch, body):
@@ -80,6 +87,16 @@ def test_missing_duplicate_or_untrusted_answers_retry_then_fail(monkeypatch, bod
     with pytest.raises(LLMUnavailable):
         reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
     assert len(calls) == 2
+
+
+def test_rejected_response_logs_fixed_reason_without_contract_text(monkeypatch, caplog):
+    monkeypatch.setattr(httpx.Client, "post", lambda self, url, **kwargs:
+                        response(url, result_for(["candidate_0001"])))
+    caplog.set_level("WARNING", logger="app.analysis_llm")
+    with pytest.raises(LLMUnavailable):
+        reviewer().judge([{"clause_id": "c1", "text": "private contract content"}], reviews(), {})
+    assert "MISSING_OR_DUPLICATE_JUDGMENT" in caplog.text
+    assert "private contract content" not in caplog.text
 
 
 def test_input_limit_splits_only_after_provider_rejects_batch(monkeypatch):
@@ -107,21 +124,30 @@ def test_input_limit_splits_only_after_provider_rejects_batch(monkeypatch):
         reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews()[:1], {})
 
 
-def test_candidate_cannot_cite_another_candidates_law(monkeypatch):
+def test_invalid_candidate_citation_is_discarded_without_losing_other_answers(monkeypatch, caplog):
     rows = reviews()
     rows[1] = (rows[1][0], [{"chunk_id": "law:2", "content": "다른 법령", "metadata": {}}])
     calls = []
 
     def post(self, url, **kwargs):
         calls.append(1)
-        return response(url, result_for(["candidate_0001", "candidate_0002"], {
-            "candidate_0001": ["law:2"],
-        }))
+        body = result_for(["candidate_0001", "candidate_0002"], {
+            "candidate_0001": ["law:2"], "candidate_0002": ["law:2"],
+        })
+        items = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        items["items"][0]["status"] = "PRESENT"
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(items)
+        return response(url, body)
 
     monkeypatch.setattr(httpx.Client, "post", post)
-    with pytest.raises(LLMUnavailable):
-        reviewer().judge([{"clause_id": "c1", "text": "원문"}], rows, {})
-    assert len(calls) == 2
+    caplog.set_level("WARNING", logger="app.analysis_llm")
+    answers = reviewer().judge([{"clause_id": "c1", "text": "private contract content"}], rows, {})
+    assert len(calls) == 1
+    assert answers["candidate_0001"].status == "NEEDS_CONFIRMATION"
+    assert answers["candidate_0001"].citation_chunk_ids == []
+    assert answers["candidate_0002"].citation_chunk_ids == ["law:2"]
+    assert "Gemini citation discarded" in caplog.text
+    assert "private contract content" not in caplog.text
 
 
 def test_no_candidates_skip_gemini(monkeypatch):
@@ -145,5 +171,32 @@ def test_scan_finding_accepts_only_its_own_law(monkeypatch):
     monkeypatch.setattr(httpx.Client, "post", post)
     assert reviewer().judge([{"clause_id": "c1", "text": "원문"}], [scan], {})["scan_0001"].findings[0].explanation == "추가 문제"
     scan[1][0]["chunk_id"] = "law:2"
+    assert reviewer().judge([{"clause_id": "c1", "text": "원문"}], [scan], {})["scan_0001"].findings[0].citation_chunk_ids == []
+
+
+def test_candidate_finding_is_ignored_but_scan_finding_is_not(monkeypatch):
+    def post(self, url, **kwargs):
+        body = result_for(["candidate_0001", "candidate_0002"])
+        items = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        items["items"][0]["findings"] = [{"category": "MISSING", "explanation": "중복 발견",
+            "required_information": [], "citation_chunk_ids": []}]
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(items)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    answers = reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
+    assert answers["candidate_0001"].findings == []
+
+
+def test_document_presence_requires_exact_contract_quote(monkeypatch):
+    def post(self, url, **kwargs):
+        body = result_for(["candidate_0001", "candidate_0002"])
+        items = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        items["items"][0].update(document_presence="PRESENT", document_quote="없는 문구",
+                                 document_clause_id="c1")
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(items)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
     with pytest.raises(LLMUnavailable):
-        reviewer().judge([{"clause_id": "c1", "text": "원문"}], [scan], {})
+        reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})

@@ -1,4 +1,6 @@
 from app.analysis_rules import candidates
+from app.analysis import stored_clauses
+from uuid import UUID
 
 
 def clause(text, number=1):
@@ -37,6 +39,21 @@ def test_explicit_problem_rules_and_application_conditions():
     codes = {x["check_code"] for x in found}
     assert {"PRESET_PENALTY", "MINIMUM_WAGE", "OVERTIME_PREMIUM", "INSUFFICIENT_BREAK"} <= codes
     assert next(x for x in found if x["check_code"] == "OVERTIME_PREMIUM")["status_hint"] == "CAUTION"
+
+
+def test_paged_stored_clauses_supply_source_ordinal_for_rule_candidates():
+    first = "시급 9,800원으로 한다."
+    content = first + "\n두 번째 조항"
+    rows = stored_clauses(UUID(int=1), content, [
+        {"page": 1, "start": 0, "end": len(first)},
+        {"page": 2, "start": len(first) + 1, "end": len(content)},
+    ])
+    found = candidates(rows, [classification([]) for _ in rows],
+                       {"effective_date": "2026-11-16"})
+    wage = next(item for item in found if item["check_code"] == "MINIMUM_WAGE")
+    assert wage["source_locations"] == [{"clause_id": rows[0]["clause_id"],
+                                          "page": 1, "ordinal_on_page": 1}]
+    assert rows[1]["ordinal_on_page"] == 1
 
 
 def test_unknown_year_and_small_workplace_do_not_create_definite_numeric_candidate():

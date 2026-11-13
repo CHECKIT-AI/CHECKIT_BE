@@ -229,8 +229,10 @@ class GeminiReviewer:
                             item.document_quote is not None or item.document_clause_id is not None
                         )):
                             raise InvalidGeminiResponse("INVALID_DOCUMENT_EVIDENCE")
-                    elif any((item.document_presence, item.document_quote, item.document_clause_id)):
-                        raise InvalidGeminiResponse("INVALID_DOCUMENT_EVIDENCE")
+                    else:
+                        item.document_presence = None
+                        item.document_quote = None
+                        item.document_clause_id = None
                     if item.findings and candidate["category"] not in {"CLAUSE_SCAN", "DOCUMENT_SCAN"}:
                         logger.warning("Gemini non-scan findings ignored: job_id=%s candidate_id=%s count=%d",
                                        correlation_id, item.candidate_id, len(item.findings))

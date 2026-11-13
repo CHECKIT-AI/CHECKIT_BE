@@ -200,3 +200,19 @@ def test_document_presence_requires_exact_contract_quote(monkeypatch):
     monkeypatch.setattr(httpx.Client, "post", post)
     with pytest.raises(LLMUnavailable):
         reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
+
+
+def test_non_missing_document_fields_are_ignored(monkeypatch):
+    def post(self, url, **kwargs):
+        body = result_for(["candidate_0001", "candidate_0002"])
+        items = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        items["items"][1].update(document_presence="PRESENT", document_quote="퇴사하면",
+                                  document_clause_id="c1")
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(items)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    answer = reviewer().judge([{"clause_id": "c1", "text": "퇴사하면 위약금 100만원"}], reviews(), {})["candidate_0002"]
+    assert answer.document_presence is None
+    assert answer.document_quote is None
+    assert answer.document_clause_id is None

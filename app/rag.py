@@ -79,7 +79,7 @@ class SearchHit(BaseModel):
 
 class SearchOutput(BaseModel):
     corpus: str
-    method: Literal["dense", "hybrid_rerank"]
+    method: Literal["dense", "hybrid_rerank", "dense_bm25_top5"]
     results: list[SearchHit]
     warnings: list[str] = Field(default_factory=list)
     clause_id: str | None = None

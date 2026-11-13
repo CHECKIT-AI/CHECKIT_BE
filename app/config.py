@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     rag_enabled: bool = False
     rag_corpus: str = Field(default="employment_basic_v004", pattern=r"^[a-zA-Z0-9_-]+$")
     rag_device: str = "cpu"
-    rag_method: Literal["dense", "hybrid_rerank"] = "dense"
+    rag_method: Literal["dense", "hybrid_rerank", "dense_bm25_top5"] = "dense_bm25_top5"
     classifier_enabled: bool = False
     classifier_model_id: str = Field(
         default="hur03/checkit-contract-classifier-core-synthetic-3epoch-v2",

@@ -89,7 +89,7 @@ class AnalyzedClause(BaseModel):
     text: str
     classification: ClassificationOutput
     corpus: str
-    retrieval_method: Literal["dense", "hybrid_rerank"]
+    retrieval_method: Literal["dense", "hybrid_rerank", "dense_bm25_top5"]
     retrieval_policy: Literal["labels_soft_priority_v1"] | None = None
     retrieval_results: list[SearchHit]
     retrieval_warnings: list[str] = Field(default_factory=list)

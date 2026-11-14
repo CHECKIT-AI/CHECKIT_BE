@@ -129,8 +129,10 @@ def test_missing_candidate_keeps_document_presence_separate_from_law_status():
                       document_presence="PRESENT", document_quote="월급 250만원",
                       document_clause_id="c1", citation_chunk_ids=["law:1"])
     jobs._resolve_missing(candidate, answer, clauses, True)
-    assert answer.status == "PRESENT"
+    assert answer.status == "NEEDS_CONFIRMATION"
+    assert "충분성" in answer.explanation
     assert "누락" not in answer.explanation
+    assert answer.required_information == ["임금 계산 방법"]
     assert candidate["source_locations"] == [{"clause_id": "c1", "page": 2}]
 
     answer = Judgment(status="PRESENT", explanation="기재되어 있습니다.",
@@ -147,6 +149,19 @@ def test_missing_candidate_keeps_document_presence_separate_from_law_status():
     assert answer.status == "NEEDS_CONFIRMATION"
     assert answer.document_presence == "PRESENT"
     assert answer.citation_chunk_ids == []
+
+
+def test_generic_quote_cannot_confirm_required_wage_components():
+    candidate = {"category": "MISSING", "required_information": ["임금 구성 항목"],
+                 "source_locations": []}
+    answer = Judgment(status="PRESENT", explanation="구성 항목이 명시되었습니다.",
+                      document_presence="PRESENT", document_quote="임금",
+                      document_clause_id="c1", citation_chunk_ids=["law:1"])
+    jobs._resolve_missing(candidate, answer,
+                          {"c1": {"clause_id": "c1", "page": 1, "text": "임금은 별도로 정한다."}}, True)
+    assert answer.document_presence == "PRESENT"
+    assert answer.status == "NEEDS_CONFIRMATION"
+    assert answer.citation_chunk_ids == ["law:1"]
 
 
 def test_saved_item_has_separate_presence_and_exact_document_quote():

@@ -141,7 +141,7 @@ CHECKIT_GEMINI_TIMEOUT_SECONDS=60
 
 `202` 응답의 `job_id`로 `GET /api/analysis/contracts/{contract_id}/jobs/{job_id}`를 조회합니다. `SUCCEEDED`면 `result.items`에 JSON 판단이, `result.citations`에 실제 인용된 RAG 청크가 들어갑니다. 계약서 상세 조회의 `current_result`에도 최신 결과가 반영됩니다. `FAILED`면 `error_code`를 보고 재요청할 수 있습니다. 동일 계약서의 동시 분석은 `409 ANALYSIS_CONFLICT`입니다. 서버 재시작으로 중단된 job은 실패 처리합니다.
 
-`result.items[].document_presence`는 계약서 기재 사실(`PRESENT`/`ABSENT`/`UNCLEAR`)이고, 기존 `status`는 법령 적용과 인용까지 검증한 최종 상태입니다. 기존 결과와 추가 발견 항목은 `document_presence: null`일 수 있습니다. `PRESENT`인 기재 항목의 `quoted_text`는 원문의 정확한 부분 문자열이고 `source_locations`에 위치가 들어갑니다. `NEEDS_CONFIRMATION`이어도 `document_presence: PRESENT`라면 문구는 발견했지만 법령 판단을 보류한 것입니다. `rule_candidate.status_hint`는 최종 판단이 아닙니다.
+`result.items[].document_presence`는 계약서 기재 사실(`PRESENT`/`ABSENT`/`UNCLEAR`)이고, 기존 `status`는 법령 적용과 인용까지 검증한 최종 상태입니다. 기존 결과와 추가 발견 항목은 `document_presence: null`일 수 있습니다. `PRESENT`인 기재 항목의 `quoted_text`는 원문의 정확한 부분 문자열이고 `source_locations`에 위치가 들어갑니다. 필수 항목의 문구가 발견되어도 그 문구만으로 기재 내용의 충분성을 확정하지 않고 `status: NEEDS_CONFIRMATION`으로 남깁니다. `rule_candidate.status_hint`는 최종 판단이 아닙니다.
 
 모든 조항과 문서 전체 누락 점검을 위해 RAG를 검색하고, 규칙 후보의 근거도 함께 Gemini에 보통 한 번 요청합니다. 후보 ID를 검증하고 후보에 허용되지 않은 인용 ID는 버립니다. 해당 법령 판단은 `NEEDS_CONFIRMATION`으로 남기며 다른 항목은 계속 처리합니다. 모델 입력·출력 한도를 넘을 때만 요청을 분할합니다. 모델이 새로 제안한 문제는 `rule_candidate.source=GEMINI`로 구분합니다. 적용 시점·법령 근거를 검증할 수 없으면 `NEEDS_CONFIRMATION`으로 저장합니다. 법령 원문을 임의 길이로 자르지 않으며, 토큰 사용량과 비용은 아직 실측하지 않았습니다.
 

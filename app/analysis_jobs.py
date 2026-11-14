@@ -215,7 +215,7 @@ def _resolve_missing(candidate, answer, clauses_by_id, verified):
     if answer.document_presence == "PRESENT":
         candidate["source_locations"] = [{"clause_id": clause["clause_id"], **(
             {"page": clause["page"]} if clause.get("page") is not None else {})}]
-        answer.required_information = []
+        answer.required_information = candidate["required_information"]
     else:
         candidate["source_locations"] = []
         answer.document_quote = None
@@ -223,12 +223,12 @@ def _resolve_missing(candidate, answer, clauses_by_id, verified):
         answer.required_information = candidate["required_information"]
     if not verified:
         answer.citation_chunk_ids = []
-    if answer.document_presence == "PRESENT" and verified:
-        answer.status = "PRESENT"
-        answer.explanation = f"계약서에서 {name} 관련 문구를 확인했습니다."
-    elif answer.document_presence == "ABSENT" and verified:
+    if answer.document_presence == "ABSENT" and verified:
         answer.status = "MISSING_SUSPECTED"
         answer.explanation = f"계약서에서 {name} 관련 문구를 찾지 못했습니다."
+    elif answer.document_presence == "PRESENT" and verified:
+        answer.status = "NEEDS_CONFIRMATION"
+        answer.explanation = f"계약서에서 {name} 관련 문구를 확인했지만 내용의 충분성은 확인이 필요합니다."
     else:
         answer.status = "NEEDS_CONFIRMATION"
         answer.explanation = (

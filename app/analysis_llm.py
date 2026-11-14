@@ -54,6 +54,10 @@ class LLMInputTooLarge(LLMUnavailable):
     pass
 
 
+class LLMReadTimeout(LLMUnavailable):
+    pass
+
+
 class InvalidGeminiResponse(ValueError):
     """A fixed diagnostic reason that never contains provider output or contract text."""
 
@@ -85,17 +89,19 @@ class GeminiReviewer:
                            correlation_id, type(exc).__name__)
             raise
 
-    def _judge(self, clauses, reviews, context, correlation_id):
+    def _judge(self, clauses, reviews, context, correlation_id, timeout_splits=2):
+        # shortcut: two timeout splits bound provider calls; revisit if larger documents need more.
         try:
             return self._request(clauses, reviews, context, correlation_id)
-        except LLMInputTooLarge:
-            if len(reviews) == 1:
+        except (LLMInputTooLarge, LLMReadTimeout) as exc:
+            if len(reviews) == 1 or (isinstance(exc, LLMReadTimeout) and not timeout_splits):
                 raise
             midpoint = len(reviews) // 2
-            logger.info("Gemini request split after input limit: job_id=%s review_count=%d",
-                        correlation_id, len(reviews))
-            return {**self._judge(clauses, reviews[:midpoint], context, correlation_id),
-                    **self._judge(clauses, reviews[midpoint:], context, correlation_id)}
+            remaining = timeout_splits - 1 if isinstance(exc, LLMReadTimeout) else timeout_splits
+            logger.info("Gemini request split: job_id=%s review_count=%d reason=%s",
+                        correlation_id, len(reviews), type(exc).__name__)
+            return {**self._judge(clauses, reviews[:midpoint], context, correlation_id, remaining),
+                    **self._judge(clauses, reviews[midpoint:], context, correlation_id, remaining)}
 
     def _request(self, clauses, reviews, context, correlation_id):
         key = self.settings.gemini_api_key.get_secret_value()
@@ -256,6 +262,11 @@ class GeminiReviewer:
                 return answers
             except LLMInputTooLarge:
                 raise
+            except httpx.ReadTimeout:
+                logger.warning("Gemini read timeout: job_id=%s attempt=%d review_count=%d",
+                               correlation_id, attempt + 1, len(reviews))
+                if len(reviews) > 1 or attempt:
+                    raise LLMReadTimeout("Gemini read timed out") from None
             except httpx.HTTPStatusError as exc:
                 if attempt:
                     logger.warning("Gemini request failed: job_id=%s attempt=%d http_status=%d",

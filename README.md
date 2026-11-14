@@ -143,7 +143,7 @@ CHECKIT_GEMINI_TIMEOUT_SECONDS=60
 
 `result.items[].document_presence`는 계약서 기재 사실(`PRESENT`/`ABSENT`/`UNCLEAR`)이고, 기존 `status`는 법령 적용과 인용까지 검증한 최종 상태입니다. 기존 결과와 추가 발견 항목은 `document_presence: null`일 수 있습니다. `PRESENT`인 기재 항목의 `quoted_text`는 원문의 정확한 부분 문자열이고 `source_locations`에 위치가 들어갑니다. 필수 항목의 문구가 발견되어도 그 문구만으로 기재 내용의 충분성을 확정하지 않고 `status: NEEDS_CONFIRMATION`으로 남깁니다. `rule_candidate.status_hint`는 최종 판단이 아닙니다.
 
-모든 조항과 문서 전체 누락 점검을 위해 RAG를 검색하고, 규칙 후보의 근거도 함께 Gemini에 보통 한 번 요청합니다. 후보 ID를 검증하고 후보에 허용되지 않은 인용 ID는 버립니다. 해당 법령 판단은 `NEEDS_CONFIRMATION`으로 남기며 다른 항목은 계속 처리합니다. 모델 입력·출력 한도를 넘을 때만 요청을 분할합니다. 모델이 새로 제안한 문제는 `rule_candidate.source=GEMINI`로 구분합니다. 적용 시점·법령 근거를 검증할 수 없으면 `NEEDS_CONFIRMATION`으로 저장합니다. 법령 원문을 임의 길이로 자르지 않으며, 토큰 사용량과 비용은 아직 실측하지 않았습니다.
+모든 조항과 문서 전체 누락 점검을 위해 RAG를 검색하고, 규칙 후보의 근거도 함께 Gemini에 보통 한 번 요청합니다. 후보 ID를 검증하고 후보에 허용되지 않은 인용 ID는 버립니다. 해당 법령 판단은 `NEEDS_CONFIRMATION`으로 남기며 다른 항목은 계속 처리합니다. 모델 입력·출력 한도를 넘거나 Gemini 응답 읽기가 시간 초과되면 요청을 분할합니다. 시간 초과로 인한 분할은 최대 두 단계로 제한합니다. 모델이 새로 제안한 문제는 `rule_candidate.source=GEMINI`로 구분합니다. 적용 시점·법령 근거를 검증할 수 없으면 `NEEDS_CONFIRMATION`으로 저장합니다. 법령 원문을 임의 길이로 자르지 않으며, 토큰 사용량과 비용은 아직 실측하지 않았습니다.
 
 개발 환경에서는 [`/dev/analysis-test`](http://localhost:8000/dev/analysis-test)에서 이메일 회원가입·로그인 후 PDF 또는 JPG·PNG를 브라우저에서 읽고 텍스트를 직접 수정·마스킹한 뒤 기존 회원 인증·DB 분석 경로를 테스트할 수 있습니다. 파일 원본은 서버로 전송하지 않습니다. 분류·RAG·Gemini 설정이 필요하며, 전송한 텍스트와 결과는 회원 기록으로 남습니다. PDF/OCR 라이브러리와 한국어 모델은 브라우저가 CDN에서 내려받으므로 첫 실행에는 네트워크가 필요합니다. 실제 계약서 사용 전 모든 페이지를 원본과 대조하고 개인정보를 가리세요.
 

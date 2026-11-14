@@ -124,6 +124,45 @@ def test_input_limit_splits_only_after_provider_rejects_batch(monkeypatch):
         reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews()[:1], {})
 
 
+def test_read_timeout_splits_batch_and_keeps_all_answers(monkeypatch):
+    calls = []
+
+    def post(self, url, **kwargs):
+        prompt = json.loads(kwargs["json"]["contents"][0]["parts"][0]["text"])
+        ids = [candidate["candidate_id"] for candidate in prompt["candidates"]]
+        calls.append(ids)
+        if len(ids) > 1:
+            raise httpx.ReadTimeout("provider response timed out")
+        return response(url, result_for(ids))
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    answers = reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
+    assert set(answers) == {"candidate_0001", "candidate_0002"}
+    assert calls == [["candidate_0001", "candidate_0002"],
+                     ["candidate_0001"], ["candidate_0002"]]
+
+
+def test_read_timeout_retries_single_review_and_bounds_batch_splits(monkeypatch):
+    calls = []
+
+    def post(self, url, **kwargs):
+        prompt = json.loads(kwargs["json"]["contents"][0]["parts"][0]["text"])
+        calls.append(len(prompt["candidates"]))
+        raise httpx.ReadTimeout("provider response timed out")
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    with pytest.raises(LLMUnavailable):
+        reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews()[:1], {})
+    assert calls == [1, 1]
+
+    calls.clear()
+    base, hits = reviews()[1]
+    rows = [({**base, "candidate_id": f"candidate_{i:04d}"}, hits) for i in range(8)]
+    with pytest.raises(LLMUnavailable):
+        reviewer().judge([{"clause_id": "c1", "text": "원문"}], rows, {})
+    assert calls == [8, 4, 2]
+
+
 def test_invalid_candidate_citation_is_discarded_without_losing_other_answers(monkeypatch, caplog):
     rows = reviews()
     rows[1] = (rows[1][0], [{"chunk_id": "law:2", "content": "다른 법령", "metadata": {}}])

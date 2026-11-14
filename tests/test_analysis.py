@@ -49,6 +49,17 @@ def test_split_numbered_articles_preserves_text():
     ]
 
 
+def test_split_ocr_numbered_lines_preserves_wrapped_text_and_preamble():
+    text = ("합성 계약서\n1   근무장소: 서울.\n2   업무내용: 개발.\n"
+            "추가 설명이 이어진다.\n12   기본 시급은 9,800원이다.")
+    assert split_page_clauses(text) == [
+        "합성 계약서",
+        "1   근무장소: 서울.",
+        "2   업무내용: 개발.\n추가 설명이 이어진다.",
+        "12   기본 시급은 9,800원이다.",
+    ]
+
+
 def test_split_blank_paragraph_fallback():
     assert split_page_clauses("임금은 월급으로 한다.\n\n근무지는 서울이다.") == [
         "임금은 월급으로 한다.", "근무지는 서울이다.",

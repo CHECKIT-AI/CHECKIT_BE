@@ -23,7 +23,7 @@ MAX_CLAUSE_LENGTH = 2000
 MAX_CLAUSES = 100
 MAX_DOCUMENT_LENGTH = 30000
 HEADING = re.compile(
-    r"(?m)^(?=(?:제\s*\d+\s*조(?:의\s*\d+)?(?:\s*\([^\n)]*\))?|\d+\s*[.)]|\d{1,2}[ \t]{2,}(?=[가-힣A-Za-z])|[가-하]\s*[.)])\s*)"
+    r"(?m)^(?=(?:제\s*\d+\s*조(?:의\s*\d+)?(?:\s*\([^\n)]*\))?|\d+\s*[.)]|\d{1,2}[ \t]+(?=[가-힣A-Za-z0-9])|[가-하]\s*[.)](?=[ \t]))\s*)"
 )
 
 
@@ -90,7 +90,7 @@ class AnalyzedClause(BaseModel):
     classification: ClassificationOutput
     corpus: str
     retrieval_method: Literal["dense", "hybrid_rerank", "dense_bm25_top5"]
-    retrieval_policy: Literal["labels_soft_priority_v1"] | None = None
+    retrieval_policy: Literal["labels_soft_priority_v1", "labels_stable_priority_v2"] | None = None
     retrieval_results: list[SearchHit]
     retrieval_warnings: list[str] = Field(default_factory=list)
     llm_context: LLMClauseContext

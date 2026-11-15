@@ -84,7 +84,7 @@ class SearchOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     clause_id: str | None = None
     labels: list[ClauseLabel] = Field(default_factory=list)
-    retrieval_policy: Literal["labels_soft_priority_v1"] | None = None
+    retrieval_policy: Literal["labels_soft_priority_v1", "labels_stable_priority_v2"] | None = None
     classification: ClassificationOutput | None = None
 
 

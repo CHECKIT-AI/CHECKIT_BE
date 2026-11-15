@@ -20,6 +20,15 @@ def test_required_fields_are_document_wide_and_classifier_is_only_a_hint():
     assert not [x for x in found if x["check_code"].startswith("MISSING_")]
 
 
+def test_pdf_wage_wording_and_wrapped_payment_are_present():
+    rows = [clause("임금: 월 기본급 2,480,000원. 매월 25일 본인 계좌로\n지급한다."),
+            clause("시간급 12,000원이다.", 2)]
+    found = candidates(rows, [classification(["임금"]), classification(["임금"])], {})
+    codes = {item["check_code"] for item in found}
+    assert "MISSING_WAGE_CALCULATION" not in codes
+    assert "MISSING_WAGE_PAYMENT" not in codes
+
+
 def test_missing_and_mismatched_label_remain_candidates():
     rows = [clause("근무지는 서울이고 담당 업무는 개발이다.")]
     found = candidates(rows, [classification(["임금"])], {})

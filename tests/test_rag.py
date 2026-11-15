@@ -53,8 +53,8 @@ def test_clause_labels_and_original_text_are_forwarded_and_linked():
     class ClauseService:
         def search_clause(self, clause_id, text, labels, top_k):
             assert (clause_id, text, labels, top_k) == ("c-7", "월급 2,500,000원은 공제하지 않는다.", ["임금"], 5)
-            return {"corpus": "employment_basic_v004", "method": "dense", "results": [],
-                    "clause_id": clause_id, "labels": labels, "retrieval_policy": "labels_soft_priority_v1"}
+            return {"corpus": "employment_basic_v004", "method": "dense_bm25_top5", "results": [],
+                    "clause_id": clause_id, "labels": labels, "retrieval_policy": "labels_stable_priority_v2"}
 
     app = make_app()
     app.state.rag_search.service = ClauseService()
@@ -64,7 +64,7 @@ def test_clause_labels_and_original_text_are_forwarded_and_linked():
         assert response.status_code == 200
         assert response.json()["clause_id"] == "c-7"
         assert response.json()["labels"] == ["임금"]
-        assert response.json()["retrieval_policy"] == "labels_soft_priority_v1"
+        assert response.json()["retrieval_policy"] == "labels_stable_priority_v2"
 
 
 def test_explicit_empty_labels_are_forwarded_without_priority_policy():

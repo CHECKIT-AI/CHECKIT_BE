@@ -23,12 +23,12 @@ class Classifier:
 
 class Search:
     def search_clause(self, clause_id, text, labels, top_k):
-        return {"corpus":"employment_basic_v004", "method":"dense", "warnings":[],
+        return {"corpus":"employment_basic_v004", "method":"dense_bm25_top5", "warnings":[],
                 "clause_id":clause_id, "labels":labels,
-                "retrieval_policy":"labels_soft_priority_v1", "results":[{
+                "retrieval_policy":"labels_stable_priority_v2", "results":[{
                     "rank":1, "chunk_id":"law::full", "cosine_distance":0.1,
                     "content":"법령 원문", "metadata":{"article_id":"law-1","law_name":"근로기준법"},
-                    "base_rank":1, "matched_labels":labels, "label_priority_score":0.9,
+                    "base_rank":1, "matched_labels":labels,
                 }]}
 
 
@@ -57,6 +57,16 @@ def test_split_ocr_numbered_lines_preserves_wrapped_text_and_preamble():
         "1   근무장소: 서울.",
         "2   업무내용: 개발.\n추가 설명이 이어진다.",
         "12   기본 시급은 9,800원이다.",
+    ]
+
+
+def test_split_pdf_extracted_single_space_numbering_ignores_wrapped_ending():
+    text = "1 근무장소: 서울.\n2 임금은 매월 25일 지급한\n다.\n3 휴일: 일요일.\n12 1일 9시간 근무."
+    assert split_page_clauses(text) == [
+        "1 근무장소: 서울.",
+        "2 임금은 매월 25일 지급한\n다.",
+        "3 휴일: 일요일.",
+        "12 1일 9시간 근무.",
     ]
 
 

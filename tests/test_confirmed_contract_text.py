@@ -75,3 +75,47 @@ def test_text_submission_rejects_unreviewed_or_unmasked_input(monkeypatch):
         body["pages"] = [body["pages"][1]]
         assert client.post("/api/contracts", json=body).status_code == 422
     assert conn.calls == []
+
+
+def test_delete_contract_requires_ownership_and_removes_record(monkeypatch):
+    class DeleteConn:
+        def __init__(self, owned):
+            self.owned = owned
+            self.calls = []
+
+        def execute(self, sql, args):
+            self.calls.append((sql, args))
+            self.row = {"id": IDS[0]} if self.owned and "FROM checkit.contracts" in sql else None
+            return self
+
+        def fetchone(self):
+            return self.row
+
+    owned = DeleteConn(True)
+    with client_for(monkeypatch, owned) as client:
+        response = client.delete(f"/api/contracts/{IDS[0]}")
+        assert response.status_code == 204
+        assert not response.content
+        schema = client.get("/openapi.json").json()
+        assert "delete" in schema["paths"]["/api/contracts/{contract_id}"]
+        preflight = client.options(f"/api/contracts/{IDS[0]}", headers={
+            "Origin": "http://localhost:8000", "Access-Control-Request-Method": "DELETE"})
+        assert preflight.headers["access-control-allow-methods"].find("DELETE") >= 0
+    assert "FOR UPDATE" in owned.calls[0][0]
+    assert owned.calls[1] == ("DELETE FROM checkit.contracts WHERE id=%s AND user_id=%s",
+                              (IDS[0], UUID(int=10)))
+
+    other = DeleteConn(False)
+    with client_for(monkeypatch, other) as client:
+        response = client.delete(f"/api/contracts/{IDS[0]}")
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "CONTRACT_NOT_FOUND"
+    assert len(other.calls) == 1
+
+
+def test_delete_contract_requires_csrf(monkeypatch):
+    app = create_app(Settings(_env_file=None), pool=Pool())
+    with TestClient(app) as client:
+        response = client.delete(f"/api/contracts/{IDS[0]}", headers={"Origin": "http://localhost:8000"})
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "CSRF_FAILED"

@@ -144,3 +144,17 @@ def detail(request: Request,
     # Recheck ownership/deletion after assembling text/results.
     require_contract(conn, actor, contract_id)
     return {"contract": contract, "files": files, "pages": pages, "text": revision, "current_result": result}
+
+
+@router.delete("/{contract_id}", status_code=204, dependencies=[Depends(require_csrf)],
+               summary="내 계약서 기록 삭제",
+               description="회원 소유 계약서와 저장된 확정 텍스트·분석 기록을 영구 삭제합니다. 복구할 수 없습니다.",
+               responses={401: error_response("AUTHENTICATION_REQUIRED", "회원 세션 필요", "인증이 필요합니다."),
+                          403: error_response("CSRF_FAILED", "CSRF 또는 Origin 오류", "보안 토큰을 확인하세요."),
+                          404: error_response("CONTRACT_NOT_FOUND", "접근 가능한 계약서 없음", "접근 가능한 계약서를 찾을 수 없습니다."),
+                          503: error_response("DATABASE_UNAVAILABLE", "DB 요청 실패", "데이터베이스 요청을 처리할 수 없습니다.", retryable=True)})
+def delete_contract(request: Request, contract_id: UUID,
+                    conn=Depends(connection, scope="function")):
+    actor = current_actor(request, conn)
+    require_contract(conn, actor, contract_id, lock=True)
+    conn.execute("DELETE FROM checkit.contracts WHERE id=%s AND user_id=%s", (contract_id, actor.id))

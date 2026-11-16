@@ -1,10 +1,10 @@
 # 회원 전용 백엔드 API 명세
 
-> 브라우저에서 확인·마스킹한 계약서 텍스트의 저장과 분석 job이 구현되어 있습니다. 서버 원본 업로드·OCR·원본 다운로드·삭제 API는 없습니다. [확정 설계](contract-risk-detection-design.md)를 참고하세요.
+> 브라우저에서 확인·마스킹한 계약서 텍스트의 저장·분석 job·기록 삭제가 구현되어 있습니다. 서버 원본 업로드·OCR·원본 다운로드 API는 없습니다. [확정 설계](contract-risk-detection-design.md)를 참고하세요.
 
 **Base URL:** `http://localhost:8000`
 
-**POST 공통 헤더:** `X-CSRF-Token: <토큰>`
+**POST·DELETE 공통 헤더:** `X-CSRF-Token: <토큰>` (허용된 `Origin`도 필요)
 
 **인증:** HttpOnly 쿠키 · 프론트 요청에 `credentials: "include"`
 
@@ -28,6 +28,7 @@
 | 마스킹 계약서 저장 | POST | `/api/contracts` | `input_kind`, 순서 있는 `pages`, 확인 플래그 2개 | `201` · `{"contract_id":"UUID","revision_id":"UUID"}` |
 | 내 계약서 목록 | GET | `/api/contracts` | Query: `limit=20&offset=0` | `200` · `{"contracts":ContractSummary[],"limit":20,"offset":0}` |
 | 계약서 상세 조회 | GET | `/api/contracts/{contract_id}` | Path: `contract_id` UUID | `200` · `ContractDetailResponse` |
+| 내 계약서 기록 삭제 | DELETE | `/api/contracts/{contract_id}` | Path: `contract_id` UUID, CSRF 헤더 | `204` · 본문 없음 |
 | 계약 조항 분류 | POST | `/api/classifier/predict` | `{"text":"계약 조항"}` | `200` · 예측 라벨·점수·임계값·모델 버전 |
 | 관련 법령 검색 | POST | `/api/rag/search` | 일반 검색, 명시적 라벨 조항 또는 자동 분류 조항 | `200` · 검색 corpus·결과·경고 |
 | 근로계약서 분석 시작 | POST | `/api/analysis/contracts/{contract_id}/jobs` | 필수: `privacy_confirmed=true`, `gemini_notice_acknowledged=true`; 선택: 적용 조건·`top_k` | `202` · `{"job_id":"UUID","status":"QUEUED"}` |
@@ -56,6 +57,8 @@ RAG 검색은 다음 세 입력 중 하나만 사용합니다.
 ```json
 {"input_kind":"PDF","pages":[{"page":1,"text":"제1조(임금)\n시급 12,000원"}],"privacy_confirmed":true,"gemini_notice_acknowledged":true}
 ```
+
+`DELETE /api/contracts/{contract_id}`는 해당 회원의 계약서, 확정 텍스트, 분석 job·결과를 영구 삭제합니다. 진행 중인 job은 결과를 게시할 수 없습니다. 삭제 후 조회 또는 재삭제는 `404 CONTRACT_NOT_FOUND`입니다. 프론트엔드는 사용자에게 복구할 수 없음을 확인받은 뒤 호출해야 합니다.
 
 분석 시작은 회원 소유 `EMPLOYMENT` 계약서의 현재 세대에 최신 **확정 마스킹 텍스트 revision**이 있어야 합니다. POST에는 쿠키·Origin·CSRF와 두 확인 플래그가 필요합니다. `effective_date`는 `YYYY-MM-DD`, `employee_count`는 1~100000, `weekly_hours`는 0보다 크고 168 이하, `top_k`는 1~10입니다. 문서에서 확인되지 않은 적용 조건은 보내지 않고 미상으로 처리합니다. 최대 원문 30000자·조항 100개·조항당 2000자·문제 후보 50개입니다.
 

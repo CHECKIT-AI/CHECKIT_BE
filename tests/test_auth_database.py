@@ -92,6 +92,43 @@ def test_actual_owner_queries(db_case):
     assert client.get(f"/api/contracts/{contracts[2]}").status_code == 404
 
 
+def test_contract_delete_cascades_confirmed_text_and_analysis(db_case):
+    conn, client, users, sessions, contracts, password = db_case
+    client.cookies.set("checkit_session", sessions[0])
+    created = client.post("/api/contracts", headers=headers(client), json={
+        "input_kind": "PDF", "pages": [{"page": 1, "text": "제1조 임금은 월 250만원이다."}],
+        "privacy_confirmed": True, "gemini_notice_acknowledged": True,
+    })
+    assert created.status_code == 201
+    contract_id, revision_id = created.json()["contract_id"], created.json()["revision_id"]
+    generation_id = conn.execute("SELECT current_file_generation_id FROM checkit.contracts WHERE id=%s",
+                                 (contract_id,)).fetchone()["current_file_generation_id"]
+    job_id = conn.execute(
+        "INSERT INTO checkit.analysis_jobs "
+        "(request_id,contract_id,kind,file_generation_id,input_revision_id,status,finished_at) "
+        "VALUES (%s,%s,'ANALYSIS',%s,%s,'SUCCEEDED',now()) RETURNING id",
+        (uuid4(), contract_id, generation_id, revision_id),
+    ).fetchone()["id"]
+    result_id = conn.execute(
+        "INSERT INTO checkit.analysis_results "
+        "(contract_id,job_id,file_generation_id,input_revision_id,summary,corpus_version) "
+        "VALUES (%s,%s,%s,%s,'test summary','test corpus') RETURNING id",
+        (contract_id, job_id, generation_id, revision_id),
+    ).fetchone()["id"]
+    conn.execute("INSERT INTO checkit.check_items (result_id,check_code,status,explanation) "
+                 "VALUES (%s,'TEST','PRESENT','test explanation')", (result_id,))
+
+    assert client.delete(f"/api/contracts/{contracts[1]}", headers=headers(client)).status_code == 404
+    assert client.delete(f"/api/contracts/{contract_id}", headers=headers(client)).status_code == 204
+    assert client.get(f"/api/contracts/{contract_id}").status_code == 404
+    for table, column, value in (
+        ("contracts", "id", contract_id), ("file_generations", "contract_id", contract_id),
+        ("text_revisions", "contract_id", contract_id), ("analysis_jobs", "contract_id", contract_id),
+        ("analysis_results", "contract_id", contract_id), ("check_items", "result_id", result_id),
+    ):
+        assert conn.execute(f"SELECT 1 FROM checkit.{table} WHERE {column}=%s", (value,)).fetchone() is None
+
+
 def test_actual_login_revocation_and_expiry(db_case):
     conn, client, users, sessions, contracts, password = db_case
     response = client.post("/api/auth/login", headers=headers(client), json={

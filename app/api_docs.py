@@ -2,14 +2,14 @@
 from copy import deepcopy
 
 API_DESCRIPTION = """
-모든 POST는 `X-CSRF-Token`이 필요합니다. `GET /api/auth/csrf` 응답 값을 입력하세요.
+모든 POST·DELETE는 `X-CSRF-Token`이 필요합니다. `GET /api/auth/csrf` 응답 값을 입력하세요.
 토큰은 10분 유효하며 재발급·로그인 후에는 최신 값을 사용하세요.
 """
 
 TAGS = [
     {"name": "health", "description": "(상태확인) 서버·DB 연결 확인"},
     {"name": "auth", "description": "(인증) 가입·로그인"},
-    {"name": "contracts", "description": "(계약서) 마스킹된 확정 텍스트 저장·내 기록 조회"},
+    {"name": "contracts", "description": "(계약서) 마스킹된 확정 텍스트 저장·내 기록 조회·삭제"},
     {"name": "classifier", "description": "(조항분류) 계약 조항 멀티라벨 분류"},
     {"name": "rag", "description": "(법령검색) 로컬 Chroma 관련 조문 검색"},
     {"name": "analysis", "description": "(계약분석) 확정된 마스킹 근로계약서의 규칙·Gemini 분석"},

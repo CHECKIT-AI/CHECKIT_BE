@@ -72,7 +72,7 @@ def create_app(settings: Settings | None = None, pool=None) -> FastAPI:
                                 headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
                                          "X-Content-Type-Options": "nosniff"})
     application.add_middleware(CORSMiddleware, allow_origins=resolved.allowed_origins,
-                               allow_credentials=True, allow_methods=["GET", "POST"],
+                               allow_credentials=True, allow_methods=["GET", "POST", "DELETE"],
                                allow_headers=["Content-Type", "X-CSRF-Token"])
     application.add_middleware(OAuthCallbackRedactionMiddleware)
 

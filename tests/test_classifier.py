@@ -12,8 +12,8 @@ from app.errors import APIError
 from app.main import create_app
 
 
-MODEL_ID = "hur03/checkit-contract-classifier-core-synthetic-3epoch-v2"
-REVISION = "1accf527c060396c5801b044e2cebf8bedb5ac12"
+MODEL_ID = "hur03/checkit-contract-classifier-multilabel-hard-v1"
+REVISION = "5f2a15e5fb7538c1ac0d0c12de4c65cf1c9e9e23"
 
 
 class Pool:
@@ -159,4 +159,4 @@ def test_pinned_public_model_sample():
     result = service.predict("월 급여는 매월 25일 지급한다.")
     assert result["revision"] == REVISION
     assert result["labels"] == ["임금"]
-    assert result["scores"] == [{"label": "임금", "score": 0.9332, "threshold": 0.5}]
+    assert result["scores"] == [{"label": "임금", "score": 0.9767, "threshold": 0.5}]

@@ -62,11 +62,12 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     assert "irrelevant" not in prompt["law_hits"][0]["metadata"]
     assert [candidate["law_chunk_ids"] for candidate in prompt["candidates"]] == [["law:1"], ["law:1"]]
     rules = " ".join(prompt["rules"])
-    assert PROMPT_VERSION == "employment_review_v5"
+    assert PROMPT_VERSION == "employment_review_v7"
     assert "제공된 law_hits의 실제 내용에서만" in rules
     assert "그 candidate_id의 law_chunk_ids에 있는 ID" in rules
     assert "근거가 없으면 finding을 만들지 마세요" in rules
     assert "document_presence" in rules
+    assert "부속합의서·별도 서면" in rules
     assert calls[0]["json"]["generationConfig"]["responseMimeType"] == "application/json"
 
 

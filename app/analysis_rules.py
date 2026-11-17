@@ -3,7 +3,7 @@
 import re
 from datetime import date
 
-RULE_VERSION = "employment_rules_v1"
+RULE_VERSION = "employment_rules_v2"
 
 # The deployed corpus contains the 2026 notice. Other years require a new,
 # reviewed notice snapshot before a numeric minimum-wage comparison is made.
@@ -11,14 +11,14 @@ MINIMUM_HOURLY_WAGE = {2026: 10320}
 MINIMUM_MONTHLY_209H = {2026: 2156880}
 
 REQUIRED = (
-    ("WAGE_COMPONENTS", "임금", (r"기본급|수당|임금.{0,8}구성|급여.{0,8}항목",), "임금 구성 항목"),
-    ("WAGE_CALCULATION", "임금", (r"시급|시간급|월\s*기본급|월급|연봉|일급|임금.{0,8}계산|급여.{0,8}산정",), "임금 계산 방법"),
-    ("WAGE_PAYMENT", "임금", (r"지급일|매월.{0,12}지급|계좌(?:로)?\s*지급|계좌.{0,12}지급|현금.{0,12}지급|지급.{0,8}방법",), "임금 지급 방법"),
-    ("SCHEDULED_HOURS", "근로시간", (r"근로\s*시간|근무\s*시간|소정.*시간|출근.*퇴근|(?:1일|하루|일)\s*\d{1,2}\s*시간",), "소정근로시간"),
-    ("HOLIDAY", "휴일", (r"휴일|주휴|공휴일",), "휴일"),
-    ("ANNUAL_LEAVE", "휴가", (r"연차|유급휴가",), "연차 유급휴가"),
-    ("WORKPLACE", "근무 장소·업무", (r"근무\s*장소|근무지|취업\s*장소",), "근무 장소"),
-    ("DUTIES", "근무 장소·업무", (r"업무|직무|담당",), "종사할 업무"),
+    ("WAGE_COMPONENTS", "임금", "임금 구성 항목"),
+    ("WAGE_CALCULATION", "임금", "임금 계산 방법"),
+    ("WAGE_PAYMENT", "임금", "임금 지급 방법"),
+    ("SCHEDULED_HOURS", "근로시간", "소정근로시간"),
+    ("HOLIDAY", "휴일", "휴일"),
+    ("ANNUAL_LEAVE", "휴가", "연차 유급휴가"),
+    ("WORKPLACE", "근무 장소·업무", "근무 장소"),
+    ("DUTIES", "근무 장소·업무", "종사할 업무"),
 )
 
 
@@ -35,19 +35,15 @@ def _candidate(code, clause=None, *, category="LEGAL_RISK", status="CAUTION", ex
     }
 
 
-def candidates(clauses: list[dict], classifications: list[dict], context: dict) -> list[dict]:
-    """Find review candidates; never turn a label alone into a legal verdict."""
+def candidates(clauses: list[dict], context: dict) -> list[dict]:
+    """Review every required term and find explicit issue candidates."""
     output = []
-    labels = set().union(*(set(row["labels"]) for row in classifications)) if classifications else set()
-    whole_text = "\n".join(clause["text"] for clause in clauses)
-    for code, label, patterns, name in REQUIRED:
-        lexical = any(re.search(pattern, whole_text) for pattern in patterns)
-        if label not in labels or not lexical:
-            output.append(_candidate(
-                f"MISSING_{code}", category="MISSING", status="MISSING_SUSPECTED" if not lexical and label not in labels
-                else "NEEDS_CONFIRMATION", explanation=f"{name}의 명시 여부를 확인해야 합니다.",
-                needed=(name,), labels=(label,),
-            ))
+    for code, label, name in REQUIRED:
+        output.append(_candidate(
+            f"MISSING_{code}", category="MISSING", status="NEEDS_CONFIRMATION",
+            explanation=f"{name}의 명시 여부를 확인해야 합니다.",
+            needed=(name,), labels=(label,),
+        ))
 
     year = date.fromisoformat(context["effective_date"]).year if context.get("effective_date") else None
     headcount = context.get("employee_count")

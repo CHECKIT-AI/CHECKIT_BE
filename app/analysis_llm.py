@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 
 
-PROMPT_VERSION = "employment_review_v5"
+PROMPT_VERSION = "employment_review_v7"
 logger = logging.getLogger(__name__)
 LAW_METADATA = (
     "law_id", "law_name", "article_id", "article_no", "version_id",
@@ -138,8 +138,8 @@ class GeminiReviewer:
                 "계약 사실은 document_clauses에서, 법적 근거는 제공된 law_hits의 실제 내용에서만 찾으세요. 없는 계약 사실, 법령, 조문 번호, 적용 요건을 지어내거나 외부 지식으로 보충하지 마세요.",
                 "각 항목의 citation_chunk_ids에는 그 candidate_id의 law_chunk_ids에 있는 ID 중 설명을 직접 뒷받침하는 것만 정확히 복사하세요. 다른 후보의 ID, 목록에 없는 ID, 중복 ID는 쓰지 마세요.",
                 "법령의 적용 시점·사업장 규모·예외를 확인하세요. 제공된 법령으로 뒷받침할 수 없거나 적용 여부가 불분명하면 citation_chunk_ids를 빈 배열로 두고 NEEDS_CONFIRMATION으로 답하세요. 근거 없는 위법 판단은 쓰지 마세요.",
-                "누락 후보는 계약서 전체에 해당 항목이 없고 제공된 법령에 그 항목의 필요성이 있을 때만 누락 의심으로 판단하세요. 확인되지 않으면 NEEDS_CONFIRMATION으로 답하세요.",
-                "MISSING 후보의 document_presence는 계약서 기재 사실만 나타냅니다: 정확한 문구가 있으면 PRESENT와 원문의 정확한 부분 문자열 document_quote 및 document_clause_id, 없으면 ABSENT와 두 null, 불명확하면 UNCLEAR와 두 null로 답하세요. 법령 적용 판단과 분리하세요.",
+                "8개 MISSING 후보는 규칙·분류 결과와 관계없이 모두 검토합니다. 누락 의심은 계약서 전체에 해당 항목이 없고 제공된 법령에 그 항목의 필요성이 있을 때만 판단하세요.",
+                "MISSING 후보의 document_presence는 계약서 기재 사실만 나타냅니다. 해당 항목의 실제 내용이 document_clauses에 있으면 PRESENT와 정확한 부분 문자열 document_quote 및 document_clause_id로 답하세요. 내용도 참조도 없으면 ABSENT와 두 null로 답하세요. 부속합의서·별도 서면을 참조하지만 그 내용이 document_clauses에 없으면 제출 여부와 내용을 알 수 없으므로 ABSENT나 PRESENT가 아닌 UNCLEAR와 두 null로 답하세요. 법령 적용 판단과 분리하세요.",
                 "MISSING 외 후보는 document_presence, document_quote, document_clause_id를 모두 null로 답하세요. status와 explanation이 서로 모순되면 안 됩니다.",
                 "DISADVANTAGE는 법 위반 여부와 구분해 불리할 수 있는 이유만 설명하세요.",
                 "CLAUSE_SCAN은 해당 조항에서 기존 후보에 없는 문제를 findings에 담으세요. DOCUMENT_SCAN은 계약서 전체에서 기존 후보에 없는 필수 항목 누락을 findings에 담으세요.",

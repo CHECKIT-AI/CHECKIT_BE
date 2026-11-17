@@ -260,6 +260,8 @@ def test_worker_reviews_all_candidates_once_and_saves_only_after_judgment(monkey
     assert len(reviewed) == 1 and saved
     assert reviewed[0][0][0]["text"] == "시급 9,000원으로 한다."
     assert len({candidate["candidate_id"] for candidate, _ in reviewed[0][1]}) == len(reviewed[0][1])
+    assert len([candidate for candidate, _ in reviewed[0][1]
+                if candidate["check_code"].startswith("MISSING_")]) == 8
     assert len(saved[0][4]) == len([candidate for candidate, _ in reviewed[0][1]
                                    if candidate["category"] not in {"CLAUSE_SCAN", "DOCUMENT_SCAN"}])
     assert search.clauses == [reviewed[0][0][0]["clause_id"]]

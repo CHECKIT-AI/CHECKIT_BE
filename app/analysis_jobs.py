@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 from app.access import connection, current_actor, require_contract, require_csrf
 from app.analysis import MAX_DOCUMENT_LENGTH, stored_clauses
 from app.analysis_llm import GeminiReviewer, Judgment, LLMInputTooLarge, LLMUnavailable, PROMPT_VERSION
-from app.analysis_rules import RULE_VERSION, candidates
+from app.analysis_rules import REQUIRED, RULE_VERSION, candidates
 from app.api_docs import error_response
 from app.errors import APIError, not_found
 from app.privacy import has_direct_identifier
@@ -333,11 +333,11 @@ def run_job(app, job_id: UUID):
         logger.info("Analysis classification completed: job_id=%s classified_count=%d",
                     job_id, len(classified))
         step = "candidate_generation"
-        found = candidates(clauses, classified, job["analysis_context"])
+        found = candidates(clauses, job["analysis_context"])
         step_detail = "-"
         logger.info("Analysis candidates generated: job_id=%s candidate_count=%d",
                     job_id, len(found))
-        if len(found) > MAX_CANDIDATES:
+        if len(found) - len(REQUIRED) > MAX_CANDIDATES:
             raise APIError(422, "ANALYSIS_INPUT_LIMIT", "문제 후보 수가 분석 제한을 초과했습니다.")
         stage = "RETRIEVE"
         step = "clause_retrieval"

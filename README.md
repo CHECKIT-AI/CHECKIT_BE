@@ -22,15 +22,31 @@ cp .env.example .env
 
 ## 파일 구조
 
-| 경로 | 역할 |
-| --- | --- |
-| `app/main.py`, `app/config.py` | 서버 진입점과 환경변수 |
-| `app/auth.py`, `app/oauth.py`, `app/access.py`, `app/security.py` | 회원 인증·인가·요청 보호 |
-| `app/contracts.py`, `app/analysis*.py` | 계약서 기록과 분석 작업 |
-| `app/classifier.py`, `app/rag.py` | 분류 모델과 Data 검색 연결 |
-| `database/` | 기준 스키마·권한·검증 SQL |
-| `scripts/`, `tests/` | 관리·검증 도구와 자동 테스트 |
-| `docs/`, `evaluation/` | 상세 안내·설계 및 평가 기록 |
+```text
+CheckIt_BE/
+├── app/
+│   ├── main.py          # 서버·CORS·헬스 체크
+│   ├── api_docs.py      # Swagger 설명
+│   ├── auth.py          # 회원 인증 API
+│   ├── oauth.py         # 소셜 로그인 API
+│   ├── contracts.py     # 계약서 기록 API
+│   ├── analysis.py      # 계약서 조항 분석 API
+│   ├── analysis_jobs.py # 분석 작업·결과 저장
+│   ├── classifier.py    # 조항 분류 모델 연결
+│   ├── rag.py           # Data 패키지 연결·법령 검색 API
+│   ├── access.py        # 세션·CSRF·소유권 검사
+│   ├── security.py      # 해시·토큰·요청 제한
+│   ├── database.py      # DB 연결 풀
+│   ├── config.py        # 환경변수
+│   ├── mail.py          # 인증 메일
+│   └── errors.py        # 공통 오류
+├── database/            # 기존 스키마·권한·검증 SQL
+├── scripts/             # 관리자 설정·DB 검증 도구
+├── tests/               # 자동 테스트
+├── docs/                # 상세 안내·설계 문서
+├── .env.example         # 환경변수 양식
+└── requirements-lock.txt
+```
 
 ## 평가
 

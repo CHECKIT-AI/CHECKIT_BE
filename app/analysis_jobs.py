@@ -180,6 +180,22 @@ def _law_hits(search, candidate, top_k):
     return search.search(candidate["explanation"] + " 근로기준법 근로조건 명시", top_k)
 
 
+def _candidate_hits(search, candidate, clause_hits, top_k, effective_date):
+    retrieved = (clause_hits[candidate["clause_id"]] if candidate["clause_id"]
+                 else _law_hits(search, candidate, top_k))
+    if candidate["check_code"] not in {"MINIMUM_WAGE", "MINIMUM_WAGE_MONTHLY"} or not effective_date:
+        return retrieved
+    notice = search.annual_notice(effective_date)
+    hits = retrieved["results"]
+    if not notice["results"]:
+        return {**retrieved, "warnings": [*retrieved.get("warnings", []), *notice["warnings"]]}
+    hit = notice["results"][0]
+    if any(row["chunk_id"] == hit["chunk_id"] for row in hits):
+        return retrieved
+    kept = hits[:top_k - 1]
+    return {**retrieved, "results": [*kept, {**hit, "rank": len(kept) + 1}]}
+
+
 def _verified_citations(chunk_ids, hits, effective_date):
     by_id = {hit["chunk_id"]: hit for hit in hits}
     for chunk_id in chunk_ids:
@@ -375,8 +391,8 @@ def run_job(app, job_id: UUID):
         for index, candidate in enumerate(found, 1):
             step = "candidate_retrieval"
             step_detail = f"candidate_{index}"
-            retrieved = (clause_hits[candidate["clause_id"]] if candidate["clause_id"]
-                         else _law_hits(app.state.rag_search, candidate, top_k))
+            retrieved = _candidate_hits(app.state.rag_search, candidate, clause_hits,
+                                        top_k, job["analysis_context"].get("effective_date"))
             if not candidate["clause_id"]:
                 law_hit_count += len(retrieved["results"])
             corpus = retrieved["corpus"]

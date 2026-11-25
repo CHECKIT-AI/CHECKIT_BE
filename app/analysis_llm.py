@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 LAW_METADATA = (
     "law_id", "law_name", "article_id", "article_no", "version_id",
     "article_effective_date", "snapshot_effective_date", "source_url",
-    "notice_id", "notice_title", "is_deleted",
+    "notice_id", "notice_title", "source_type", "valid_from", "valid_to", "is_deleted",
 )
 
 
@@ -235,7 +235,14 @@ class GeminiReviewer:
                         ) or (item.document_presence != "PRESENT" and (
                             item.document_quote is not None or item.document_clause_id is not None
                         )):
-                            raise InvalidGeminiResponse("INVALID_DOCUMENT_EVIDENCE")
+                            logger.warning("Gemini document evidence discarded: job_id=%s candidate_id=%s",
+                                           correlation_id, item.candidate_id)
+                            item.document_presence = "UNCLEAR"
+                            item.document_quote = None
+                            item.document_clause_id = None
+                            item.citation_chunk_ids = []
+                            item.status = "NEEDS_CONFIRMATION"
+                            item.explanation = "계약서 기재 여부를 검증할 수 없어 판단을 보류합니다."
                     else:
                         item.document_presence = None
                         item.document_quote = None
@@ -244,20 +251,22 @@ class GeminiReviewer:
                         logger.warning("Gemini non-scan findings ignored: job_id=%s candidate_id=%s count=%d",
                                        correlation_id, item.candidate_id, len(item.findings))
                         item.findings = []
+                    if candidate["category"] == "DOCUMENT_SCAN":
+                        valid_findings = [finding for finding in item.findings if finding.category == "MISSING"]
+                    elif candidate["category"] == "CLAUSE_SCAN":
+                        valid_findings = [finding for finding in item.findings if finding.category != "MISSING"]
+                    else:
+                        valid_findings = item.findings
+                    if len(valid_findings) != len(item.findings):
+                        logger.warning("Gemini finding discarded: job_id=%s candidate_id=%s count=%d",
+                                       correlation_id, item.candidate_id, len(item.findings) - len(valid_findings))
+                        item.findings = valid_findings
                     for finding in item.findings:
                         if _invalid_citations(finding.citation_chunk_ids, allowed[item.candidate_id]):
                             logger.warning("Gemini finding citation discarded: job_id=%s candidate_id=%s",
                                            correlation_id, item.candidate_id)
                             finding.citation_chunk_ids = []
                             finding.explanation = "법령 인용을 검증할 수 없어 추가 판단을 보류합니다."
-                if any(any(
-                            (by_id[item.candidate_id]["category"] == "DOCUMENT_SCAN" and
-                             finding.category != "MISSING") or
-                            (by_id[item.candidate_id]["category"] == "CLAUSE_SCAN" and
-                             finding.category == "MISSING")
-                            for finding in item.findings)
-                        for item in batch.items):
-                    raise InvalidGeminiResponse("INVALID_FINDING")
                 logger.info("Gemini request completed: job_id=%s attempt=%d answer_count=%d",
                             correlation_id, attempt + 1, len(answers))
                 return answers

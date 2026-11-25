@@ -14,7 +14,8 @@ def reviewer():
 
 def reviews():
     shared = {"chunk_id": "law:1", "content": "조문 원문과 예외", "metadata": {
-        "source_url": "https://www.law.go.kr/1", "law_name": "근로기준법", "irrelevant": "omit",
+        "source_url": "https://www.law.go.kr/1", "law_name": "근로기준법",
+        "valid_from": "20260101", "valid_to": "20261231", "irrelevant": "omit",
     }}
     return [
         ({"candidate_id": "candidate_0001", "check_code": "MISSING_WAGE", "category": "MISSING",
@@ -59,6 +60,7 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     assert prompt["document_clauses"] == clauses
     assert len(prompt["law_hits"]) == 1
     assert prompt["law_hits"][0]["content"] == "조문 원문과 예외"
+    assert prompt["law_hits"][0]["metadata"]["valid_to"] == "20261231"
     assert "irrelevant" not in prompt["law_hits"][0]["metadata"]
     assert [candidate["law_chunk_ids"] for candidate in prompt["candidates"]] == [["law:1"], ["law:1"]]
     rules = " ".join(prompt["rules"])
@@ -230,17 +232,58 @@ def test_candidate_finding_is_ignored_but_scan_finding_is_not(monkeypatch):
 
 
 def test_document_presence_requires_exact_contract_quote(monkeypatch):
+    calls = []
     def post(self, url, **kwargs):
+        calls.append(1)
         body = result_for(["candidate_0001", "candidate_0002"])
         items = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
         items["items"][0].update(document_presence="PRESENT", document_quote="없는 문구",
                                  document_clause_id="c1")
+        items["items"][1]["citation_chunk_ids"] = ["law:1"]
         body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(items)
         return response(url, body)
 
     monkeypatch.setattr(httpx.Client, "post", post)
-    with pytest.raises(LLMUnavailable):
-        reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
+    answers = reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
+    assert calls == [1]
+    assert answers["candidate_0001"].document_presence == "UNCLEAR"
+    assert answers["candidate_0001"].document_quote is None
+    assert answers["candidate_0001"].citation_chunk_ids == []
+    assert answers["candidate_0001"].status == "NEEDS_CONFIRMATION"
+    assert answers["candidate_0002"].citation_chunk_ids == ["law:1"]
+
+
+@pytest.mark.parametrize(("scan_category", "invalid_category", "valid_category"), [
+    ("CLAUSE_SCAN", "MISSING", "LEGAL_RISK"),
+    ("DOCUMENT_SCAN", "LEGAL_RISK", "MISSING"),
+])
+def test_invalid_scan_finding_does_not_discard_other_results(monkeypatch, scan_category,
+                                                             invalid_category, valid_category):
+    scan = ({"candidate_id": "scan_0001", "check_code": "DISCOVERED_ISSUE",
+             "category": scan_category, "clause_id": "c1" if scan_category == "CLAUSE_SCAN" else None,
+             "explanation": "추가 검토",
+             "required_information": [], "retrieval_warnings": []}, reviews()[0][1])
+    calls = []
+
+    def post(self, url, **kwargs):
+        calls.append(1)
+        body = result_for(["scan_0001", "candidate_0002"])
+        items = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        items["items"][0]["findings"] = [
+            {"category": invalid_category, "explanation": "잘못된 추가 발견",
+             "required_information": [], "citation_chunk_ids": []},
+            {"category": valid_category, "explanation": "유효한 추가 발견",
+             "required_information": [], "citation_chunk_ids": ["law:1"]},
+        ]
+        items["items"][1]["citation_chunk_ids"] = ["law:1"]
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(items)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    answers = reviewer().judge([{"clause_id": "c1", "text": "원문"}], [scan, reviews()[1]], {})
+    assert calls == [1]
+    assert [finding.explanation for finding in answers["scan_0001"].findings] == ["유효한 추가 발견"]
+    assert answers["candidate_0002"].citation_chunk_ids == ["law:1"]
 
 
 def test_non_missing_document_fields_are_ignored(monkeypatch):

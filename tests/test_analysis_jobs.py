@@ -235,6 +235,33 @@ class WorkerSearch:
         self.clauses.append(clause_id)
         return {"corpus": "employment_basic_v004", "results": []}
 
+    def annual_notice(self, effective_date):
+        return {"results": [], "warnings": ["해당 연도 고시 없음"]}
+
+
+def test_minimum_wage_candidate_receives_applicable_notice_without_changing_clause_scan():
+    notice = {"chunk_id": "notice:2026", "content": "2026년 최저임금 10,320원", "rank": 1,
+              "metadata": {"source_type": "administrative_notice", "valid_from": "20260101",
+                           "valid_to": "20261231"}}
+    class Search:
+        def annual_notice(self, effective_date):
+            return {"results": [notice] if effective_date == "2026-11-01" else [], "warnings": []}
+
+    ordinary = [{"chunk_id": f"law:{i}", "rank": i} for i in range(1, 6)]
+    clause_hits = {"c1": {"results": ordinary, "warnings": []}}
+    candidate = {"check_code": "MINIMUM_WAGE", "clause_id": "c1"}
+    result = jobs._candidate_hits(Search(), candidate, clause_hits, 5, "2026-11-01")
+    assert [hit["chunk_id"] for hit in result["results"]] == ["law:1", "law:2", "law:3", "law:4", "notice:2026"]
+    assert result["results"][-1]["rank"] == 5
+    assert clause_hits["c1"]["results"] == ordinary
+    assert jobs._candidate_hits(Search(), {**candidate, "check_code": "MINIMUM_WAGE_MONTHLY"},
+                                clause_hits, 5, "2026-11-01")["results"][-1]["chunk_id"] == "notice:2026"
+    assert jobs._candidate_hits(Search(), candidate, {"c1": {"results": [notice]}},
+                                5, "2026-11-01")["results"] == [notice]
+    assert jobs._candidate_hits(Search(), candidate, clause_hits, 5, "2025-11-01") == clause_hits["c1"]
+    assert jobs._candidate_hits(Search(), {**candidate, "check_code": "PRESET_PENALTY"},
+                                clause_hits, 5, "2026-11-01") == clause_hits["c1"]
+
 
 def test_worker_reviews_all_candidates_once_and_saves_only_after_judgment(monkeypatch):
     reviewed = []

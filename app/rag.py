@@ -101,6 +101,9 @@ class LocalSearch:
     def search_clause(self, clause_id, text, labels, top_k):
         return self._run(lambda service: service.search_clause(clause_id, text, labels, top_k))
 
+    def annual_notice(self, effective_date):
+        return self._run(lambda service: service.annual_notice(effective_date))
+
     def _run(self, invoke):
         if not self.settings.rag_enabled:
             logger.warning("RAG unavailable: reason=disabled")

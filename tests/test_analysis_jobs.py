@@ -184,6 +184,40 @@ def test_wage_payment_recovers_only_exact_positive_contract_text():
         "c1": {"clause_id": "c1", "text": "임금은 매월 말일에 지급하지 않는다."}})
     assert answer.document_presence == "UNCLEAR"
 
+    answer = Judgment(status="NEEDS_CONFIRMATION", explanation="확인 불가",
+                      document_presence="UNCLEAR")
+    jobs._recover_wage_payment_quote(candidate, answer, {
+        "c1": {"clause_id": "c1", "text": "기본급은 월 278만 원이며 매월 25일 근로자 명의 계좌로 송금한다."}})
+    assert answer.document_presence == "PRESENT"
+    assert answer.document_quote == "매월 25일 근로자 명의 계좌로 송금"
+
+
+def test_obvious_contract_content_prevents_false_absence():
+    clauses = {"c1": {"clause_id": "c1", "text": "기본급은 월 278만 원이며 매월 25일 계좌로 송금한다."},
+               "c2": {"clause_id": "c2", "text": "시업은 오전 9시, 종업은 오후 6시다."},
+               "c3": {"clause_id": "c3", "text": "주된 근무지는 고객운영실이며 민원 기록을 담당한다."}}
+    for code in ("MISSING_WAGE_COMPONENTS", "MISSING_WAGE_CALCULATION",
+                 "MISSING_WAGE_PAYMENT", "MISSING_SCHEDULED_HOURS",
+                 "MISSING_WORKPLACE", "MISSING_DUTIES"):
+        candidate = {"check_code": code, "category": "MISSING",
+                     "required_information": [code], "source_locations": []}
+        answer = Judgment(status="MISSING_SUSPECTED", explanation="없습니다.",
+                          document_presence="ABSENT", citation_chunk_ids=["law:1"])
+        jobs._guard_missing_absence(candidate, answer, clauses)
+        jobs._resolve_missing(candidate, answer, clauses, True)
+        assert answer.document_presence == "UNCLEAR"
+        assert answer.status == "NEEDS_CONFIRMATION"
+        assert "찾지 못했습니다" not in answer.explanation
+
+    candidate = {"check_code": "MISSING_HOLIDAY", "category": "MISSING",
+                 "required_information": ["휴일"], "source_locations": []}
+    answer = Judgment(status="MISSING_SUSPECTED", explanation="없습니다.",
+                      document_presence="ABSENT", citation_chunk_ids=["law:1"])
+    jobs._guard_missing_absence(candidate, answer, clauses)
+    jobs._resolve_missing(candidate, answer, clauses, True)
+    assert answer.document_presence == "ABSENT"
+    assert answer.status == "MISSING_SUSPECTED"
+
 
 def test_saved_item_has_separate_presence_and_exact_document_quote():
     class SaveConn:
@@ -297,11 +331,13 @@ def test_review_batches_keep_each_clause_candidate_and_global_review_once():
 
 def test_worker_reviews_clause_and_missing_batches_then_saves(monkeypatch):
     reviewed = []
+    presence_flags = []
     saved = []
 
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None, **kwargs):
             reviewed.append((clauses, reviews, clause_results))
+            presence_flags.append(kwargs.get("presence_only", False))
             return {candidate["candidate_id"]: Judgment(
                 status="NEEDS_CONFIRMATION", explanation="확인 필요",
                 required_information=[], citation_chunk_ids=[])
@@ -316,19 +352,21 @@ def test_worker_reviews_clause_and_missing_batches_then_saves(monkeypatch):
     monkeypatch.setattr(jobs, "_stage", lambda *args: None)
     monkeypatch.setattr(jobs, "_save_result", lambda *args: saved.append(args))
     jobs.run_job(app, CONTRACT_ID)
-    assert len(reviewed) == 2 and saved
+    assert len(reviewed) == 3 and saved
     assert reviewed[0][0][0]["text"] == "시급 9,000원으로 한다."
-    all_reviews = [row for _, batch, _ in reviewed for row in batch]
+    all_reviews = [row for _, batch, _ in (reviewed[0], reviewed[-1]) for row in batch]
     assert len({candidate["candidate_id"] for candidate, _ in all_reviews}) == len(all_reviews)
-    assert len([candidate for candidate, _ in reviewed[1][1]
-                if candidate["check_code"].startswith("MISSING_")]) == 8
+    assert presence_flags == [False, True, False]
+    assert len(reviewed[1][1]) == 8
+    assert all(candidate["check_code"].startswith("MISSING_")
+               for candidate, _ in reviewed[1][1])
     assert len(saved[0][4]) == len([candidate for candidate, _ in all_reviews
                                    if candidate["category"] not in {"CLAUSE_SCAN", "DOCUMENT_SCAN"}])
     assert search.clauses == [reviewed[0][0][0]["clause_id"]]
     assert {candidate["category"] for candidate, _ in reviewed[0][1]} >= {"CLAUSE_SCAN"}
-    assert {candidate["category"] for candidate, _ in reviewed[1][1]} >= {"DOCUMENT_SCAN", "MISSING"}
+    assert {candidate["category"] for candidate, _ in reviewed[-1][1]} >= {"DOCUMENT_SCAN", "MISSING"}
     assert reviewed[0][2] is None
-    assert reviewed[1][2] and reviewed[1][2][0]["candidate_id"] == "scan_0001"
+    assert reviewed[-1][2] and reviewed[-1][2][0]["candidate_id"] == "scan_0001"
     assert app.state.database_pool.conn.failed_code is None
 
 
@@ -354,7 +392,7 @@ def test_no_issue_candidate_is_skipped_only_with_verified_law(monkeypatch):
             return {"corpus": "employment_basic_v004", "results": self.hits}
 
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None, **kwargs):
             return {candidate["candidate_id"]: Judgment(
                 status="NO_ISSUE_FOUND", explanation="제공된 근거에서 해당 위험을 발견하지 못했습니다.",
                 citation_chunk_ids=["law:1"] if hits else [])
@@ -387,7 +425,7 @@ def test_worker_marks_verified_2026_minimum_wage_gap_as_caution(monkeypatch):
             return {"results": [notice], "warnings": []}
 
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None, **kwargs):
             return {candidate["candidate_id"]: Judgment(
                 status="NO_ISSUE_FOUND" if candidate["check_code"] == "MINIMUM_WAGE" else "NEEDS_CONFIRMATION",
                 explanation="기본 시급이 고시보다 낮습니다.",
@@ -412,7 +450,7 @@ def test_worker_saves_discovered_issue_as_needs_confirmation_without_verified_la
     saved = []
 
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None, **kwargs):
             answers = {candidate["candidate_id"]: Judgment(
                 status="NEEDS_CONFIRMATION", explanation="확인 필요") for candidate, _ in reviews}
             if "scan_0001" in answers:
@@ -461,7 +499,7 @@ def test_empty_result_summary_does_not_claim_contract_is_safe():
 
 def test_worker_records_sanitized_failure_code(monkeypatch):
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None, **kwargs):
             raise LLMUnavailable("provider secret details")
 
     app = SimpleNamespace(state=SimpleNamespace(
@@ -479,7 +517,7 @@ def test_later_batch_failure_does_not_save_partial_result(monkeypatch):
     saved = []
 
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None, **kwargs):
             if any(candidate["clause_id"] is None for candidate, _ in reviews):
                 raise LLMUnavailable("provider unavailable")
             return {candidate["candidate_id"]: Judgment(
@@ -499,7 +537,7 @@ def test_later_batch_failure_does_not_save_partial_result(monkeypatch):
 
 def test_worker_reports_unsplittable_input_without_retry(monkeypatch):
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None, **kwargs):
             raise LLMInputTooLarge("provider details")
 
     app = SimpleNamespace(state=SimpleNamespace(

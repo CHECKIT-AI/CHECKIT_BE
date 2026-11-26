@@ -64,7 +64,7 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     assert "irrelevant" not in prompt["law_hits"][0]["metadata"]
     assert [candidate["law_chunk_ids"] for candidate in prompt["candidates"]] == [["law:1"], ["law:1"]]
     rules = " ".join(prompt["rules"])
-    assert PROMPT_VERSION == "employment_review_v12"
+    assert PROMPT_VERSION == "employment_review_v19"
     assert prompt["task"] == (
         "각 조항을 관련 법령 원문과 대조해 해당 문구에 법적 문제가 있는지 검토하세요. "
         "위법을 확정하지 마세요."
@@ -75,6 +75,7 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     assert "근거가 없으면 finding을 만들지 마세요" in rules
     assert "CLAUSE_SCAN은 해당 조항" in rules
     assert "NO_ISSUE_FOUND" in rules
+    assert "위반 소지, 적용 요건 미충족" in rules
     assert calls[0]["json"]["generationConfig"]["responseMimeType"] == "application/json"
 
 
@@ -96,10 +97,49 @@ def test_document_review_receives_whole_contract_and_clause_results(monkeypatch)
     assert "누락" in calls[0]["task"]
     rules = " ".join(calls[0]["rules"])
     assert "부속합의서·별도 서면" in rules
-    assert "제공된 MISSING 후보" in rules
-    assert "DOCUMENT_SCAN은" in rules
+    assert "모든 MISSING 후보" in rules
+    assert "법령이 부족해도 기재 여부는 별도로" in rules
+    assert "ABSENT로 답하기 전에" in rules
+    assert "항목 이름만 언급한 것은 실제 내용으로 간주하지 마세요" in rules
+    assert "DOCUMENT_SCAN의 findings에는" in rules
+    assert "DOCUMENT_SCAN의 finding은 MISSING만" in rules
     assert "CLAUSE_SCAN은" not in rules
     assert "NO_ISSUE_FOUND" not in rules
+
+
+def test_presence_is_checked_without_law_and_kept_for_document_review(monkeypatch):
+    prompts = []
+
+    def post(self, url, **kwargs):
+        prompt = json.loads(kwargs["json"]["contents"][0]["parts"][0]["text"])
+        prompts.append(prompt)
+        body = result_for(["candidate_0001"])
+        item = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        item["items"][0].update(status="MISSING_SUSPECTED", explanation="임금이 없습니다.",
+                                document_presence="PRESENT" if len(prompts) == 1 else "ABSENT",
+                                document_quote="기본급 278만 원" if len(prompts) == 1 else None,
+                                document_clause_id="c1" if len(prompts) == 1 else None)
+        if len(prompts) == 1:
+            item["items"][0] = {name: item["items"][0][name] for name in (
+                "candidate_id", "document_presence", "document_quote", "document_clause_id"
+            )}
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(item)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    clauses = [{"clause_id": "c1", "text": "기본급 278만 원"}]
+    missing = reviews()[:1]
+    presence = reviewer().judge(clauses, [(missing[0][0], [])], {}, presence_only=True)
+    answer = reviewer().judge(clauses, missing, {}, presence_results=presence)["candidate_0001"]
+    assert "law_hits" not in prompts[0]
+    assert "applicability" not in prompts[0]
+    assert "'업무 중'처럼 단어만" in " ".join(prompts[0]["rules"])
+    assert "월급·시급·일급 등 산정 단위" in " ".join(prompts[0]["rules"])
+    assert "퇴직 후 미지급금 정산 기한" in " ".join(prompts[0]["rules"])
+    assert prompts[1]["document_presence_results"][0]["document_quote"] == "기본급 278만 원"
+    assert answer.document_presence == "PRESENT"
+    assert answer.document_quote == "기본급 278만 원"
+    assert answer.status == "NEEDS_CONFIRMATION"
 
 
 @pytest.mark.parametrize("body", [
@@ -262,6 +302,66 @@ def test_document_presence_requires_exact_contract_quote(monkeypatch):
     assert answers["candidate_0002"].citation_chunk_ids == ["law:1"]
 
 
+def test_missing_status_and_explanation_follow_document_evidence(monkeypatch):
+    def post(self, url, **kwargs):
+        body = result_for(["candidate_0001"])
+        item = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        item["items"][0].update(status="MISSING_SUSPECTED", explanation="임금 항목이 없습니다.",
+                                document_presence="PRESENT", document_quote="기본급 278만 원",
+                                document_clause_id="c1")
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(item)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    answer = reviewer().judge([{"clause_id": "c1", "text": "기본급 278만 원"}], reviews()[:1], {})["candidate_0001"]
+    assert answer.document_presence == "PRESENT"
+    assert answer.status == "NEEDS_CONFIRMATION"
+    assert "확인했습니다" in answer.explanation
+    assert "없습니다" not in answer.explanation
+
+
+def test_generic_work_mention_is_not_duties_evidence(monkeypatch):
+    candidate = ({"candidate_id": "duties", "check_code": "MISSING_DUTIES",
+                  "category": "MISSING", "clause_id": None, "explanation": "업무 확인",
+                  "required_information": ["종사할 업무"], "retrieval_warnings": []}, [])
+
+    def post(self, url, **kwargs):
+        body = result_for(["duties"])
+        item = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        item["items"][0].update(document_presence="PRESENT",
+                                document_quote="업무 중 접한 자료는 외부에 전달하지 않는다.",
+                                document_clause_id="c1")
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(item)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    answer = reviewer().judge([{"clause_id": "c1", "text": "업무 중 접한 자료는 외부에 전달하지 않는다."}],
+                              [candidate], {})["duties"]
+    assert answer.document_presence == "UNCLEAR"
+    assert answer.status == "NEEDS_CONFIRMATION"
+
+
+def test_final_pay_deadline_is_not_regular_payment_evidence(monkeypatch):
+    candidate = ({"candidate_id": "payment", "check_code": "MISSING_WAGE_PAYMENT",
+                  "category": "MISSING", "clause_id": None, "explanation": "지급 방법 확인",
+                  "required_information": ["임금 지급 방법"], "retrieval_warnings": []}, [])
+
+    def post(self, url, **kwargs):
+        body = result_for(["payment"])
+        item = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        item["items"][0].update(document_presence="PRESENT",
+                                document_quote="퇴직 후 미지급 급여를 10일 안에 이체한다.",
+                                document_clause_id="c1")
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(item)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    answer = reviewer().judge([{"clause_id": "c1", "text": "퇴직 후 미지급 급여를 10일 안에 이체한다."}],
+                              [candidate], {})["payment"]
+    assert answer.document_presence == "UNCLEAR"
+    assert answer.status == "NEEDS_CONFIRMATION"
+
+
 @pytest.mark.parametrize(("scan_category", "invalid_category", "valid_category"), [
     ("CLAUSE_SCAN", "MISSING", "LEGAL_RISK"),
     ("DOCUMENT_SCAN", "LEGAL_RISK", "MISSING"),
@@ -309,3 +409,21 @@ def test_non_missing_document_fields_are_ignored(monkeypatch):
     assert answer.document_presence is None
     assert answer.document_quote is None
     assert answer.document_clause_id is None
+
+
+@pytest.mark.parametrize("explanation", [
+    "법령의 요건을 충족하지 못합니다.",
+    "근로자의 권리를 침해할 수 있으나 법적 문제가 없습니다.",
+])
+def test_no_issue_with_conflicting_explanation_is_held(monkeypatch, explanation):
+    def post(self, url, **kwargs):
+        body = result_for(["candidate_0002"])
+        item = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
+        item["items"][0].update(status="NO_ISSUE_FOUND", explanation=explanation)
+        body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(item)
+        return response(url, body)
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    answer = reviewer().judge([{"clause_id": "c1", "text": "원문"}], [reviews()[1]], {})["candidate_0002"]
+    assert answer.status == "NEEDS_CONFIRMATION"
+    assert answer.explanation == "상태와 설명이 일치하지 않아 판단을 보류합니다."

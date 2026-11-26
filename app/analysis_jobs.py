@@ -23,6 +23,16 @@ router = APIRouter(prefix="/api/analysis/contracts", tags=["analysis"])
 MAX_CANDIDATES = 50
 MAX_DISCOVERIES = 50
 logger = logging.getLogger(__name__)
+PRESENCE_HINTS = {
+    "MISSING_WAGE_COMPONENTS": r"기본급|월급|시급|임금|급여|수당",
+    "MISSING_WAGE_CALCULATION": r"기본급|월급|시급|임금|급여",
+    "MISSING_WAGE_PAYMENT": r"계좌|송금|입금|지급일|매월.{0,20}지급",
+    "MISSING_SCHEDULED_HOURS": r"시업|종업|근무.{0,10}시간|하루.{0,10}시간",
+    "MISSING_HOLIDAY": r"휴일|주휴|매주.{0,10}(?:요일|쉰다)",
+    "MISSING_ANNUAL_LEAVE": r"연차|유급휴가",
+    "MISSING_WORKPLACE": r"근무지|근무\s*장소|사업장|지점",
+    "MISSING_DUTIES": r"업무|직무|담당|종사",
+}
 
 
 class JobInput(BaseModel):
@@ -235,15 +245,25 @@ def _recover_wage_payment_quote(candidate, answer, clauses):
     if candidate["check_code"] != "MISSING_WAGE_PAYMENT" or answer.document_presence == "PRESENT":
         return
     for clause in clauses.values():
-        if not re.search(r"임금|급여|월급|시급|시간급", clause["text"]):
+        if not re.search(r"임금|급여|기본급|월급|시급|시간급", clause["text"]):
             continue
         match = re.search(r"(?:매월\s*(?:말일|\d{1,2}일)|(?:본인|근로자)\s*명의\s*계좌)"
-                          r".{0,80}?지급(?!하지\s*않|하지\s*못)", clause["text"], re.S)
+                          r".{0,80}?(?:지급|송금|입금|이체)(?!하지\s*않|하지\s*못)",
+                          clause["text"], re.S)
         if match:
             answer.document_presence = "PRESENT"
             answer.document_quote = match.group()
             answer.document_clause_id = clause["clause_id"]
             return
+
+
+def _guard_missing_absence(candidate, answer, clauses):
+    if answer.document_presence != "ABSENT":
+        return
+    pattern = PRESENCE_HINTS.get(candidate["check_code"])
+    # shortcut: keyword hints prevent obvious false absence, reviewed field evidence is needed for PRESENT.
+    if pattern and any(re.search(pattern, clause["text"], re.S) for clause in clauses.values()):
+        answer.document_presence = "UNCLEAR"
 
 
 def _resolve_missing(candidate, answer, clauses_by_id, verified):
@@ -436,10 +456,19 @@ def run_job(app, job_id: UUID):
         _stage(pool, job_id, stage)
         logger.info("Analysis evaluation started: job_id=%s review_count=%d", job_id, len(reviews))
         answers = {}
+        clauses_by_id = {clause["clause_id"]: clause for clause in clauses}
         for index, batch in enumerate(_review_batches(clauses, reviews), 1):
             step_detail = f"batch_{index}"
             document_review = all(candidate["clause_id"] is None for candidate, _ in batch)
             if document_review:
+                presence_reviews = [(candidate, []) for candidate, _ in batch
+                                    if candidate["category"] == "MISSING"]
+                presence = reviewer.judge(clauses, presence_reviews, job["analysis_context"],
+                                          str(job_id), presence_only=True)
+                for candidate, _ in presence_reviews:
+                    answer = presence[candidate["candidate_id"]]
+                    _recover_wage_payment_quote(candidate, answer, clauses_by_id)
+                    _guard_missing_absence(candidate, answer, clauses_by_id)
                 clause_results = [{
                     "candidate_id": candidate["candidate_id"],
                     "clause_id": candidate["clause_id"],
@@ -450,7 +479,8 @@ def run_job(app, job_id: UUID):
                                  answers[candidate["candidate_id"]].findings],
                 } for candidate, _ in reviews if candidate["clause_id"] is not None]
                 answers.update(reviewer.judge(
-                    clauses, batch, job["analysis_context"], str(job_id), clause_results))
+                    clauses, batch, job["analysis_context"], str(job_id), clause_results,
+                    presence_results=presence))
             else:
                 clause_ids = {candidate["clause_id"] for candidate, _ in batch}
                 batch_clauses = [clause for clause in clauses if clause["clause_id"] in clause_ids]
@@ -462,7 +492,6 @@ def run_job(app, job_id: UUID):
         step = "result_validation"
         decisions = []
         discovery_count = 0
-        clauses_by_id = {clause["clause_id"]: clause for clause in clauses}
         for candidate, hits in reviews:
             answer = answers[candidate["candidate_id"]]
             if candidate["category"] in {"CLAUSE_SCAN", "DOCUMENT_SCAN"}:
@@ -491,6 +520,7 @@ def run_job(app, job_id: UUID):
                             _verified_citations(answer.citation_chunk_ids, hits, date.fromisoformat(effective)))
             if candidate["category"] == "MISSING":
                 _recover_wage_payment_quote(candidate, answer, clauses_by_id)
+                _guard_missing_absence(candidate, answer, clauses_by_id)
                 _resolve_missing(candidate, answer, clauses_by_id,
                                  bool(verified and date.fromisoformat(effective).year == 2026))
                 decisions.append((candidate, answer, hits))

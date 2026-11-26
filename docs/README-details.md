@@ -130,7 +130,7 @@ CHECKIT_CLASSIFIER_ENABLED=true
 CHECKIT_RAG_ENABLED=true
 CHECKIT_GEMINI_API_KEY=서버에서만_사용할_키
 CHECKIT_GEMINI_MODEL=gemini-3.8-flash
-CHECKIT_GEMINI_TIMEOUT_SECONDS=60
+CHECKIT_GEMINI_TIMEOUT_SECONDS=180
 ```
 
 회원 쿠키와 최신 CSRF 토큰으로 `POST /api/contracts`에 마스킹 페이지 텍스트를 저장한 뒤 `POST /api/analysis/contracts/{contract_id}/jobs`를 호출합니다. 두 요청 모두 사용자의 개인정보 확인과 Gemini 전송 안내 확인이 필요합니다. `effective_date`, `employee_count`, `work_type`, `weekly_hours`는 선택 입력이며 문서에서 확인되지 않으면 생략합니다.
@@ -143,11 +143,11 @@ CHECKIT_GEMINI_TIMEOUT_SECONDS=60
 
 새 분석 결과의 `result.items`에는 임금 구성·계산·지급, 소정근로시간, 휴일, 연차, 근무 장소, 업무의 `MISSING_*` 코드 8개가 항상 포함됩니다. 분류 라벨·문구 규칙은 이 검사를 생략하지 않습니다. `result.items[].document_presence`는 계약서 기재 사실(`PRESENT`/`ABSENT`/`UNCLEAR`)이고, 기존 `status`는 법령 적용과 인용까지 검증한 최종 상태입니다. 기존 결과와 추가 발견 항목은 `document_presence: null`일 수 있습니다. `PRESENT`인 기재 항목의 `quoted_text`는 원문의 정확한 부분 문자열이고 `source_locations`에 위치가 들어갑니다. 필수 항목의 문구가 발견되어도 그 문구만으로 기재 내용의 충분성을 확정하지 않고 `status: NEEDS_CONFIRMATION`으로 남깁니다. `rule_candidate.status_hint`는 최종 판단이 아닙니다.
 
-모든 조항과 문서 전체 누락 점검을 위해 RAG를 검색하고, 규칙 후보의 근거도 함께 Gemini에 보통 한 번 요청합니다. 후보 ID를 검증하고 후보에 허용되지 않은 인용 ID는 버립니다. 해당 법령 판단은 `NEEDS_CONFIRMATION`으로 남기며 다른 항목은 계속 처리합니다. 모델 입력·출력 한도를 넘거나 Gemini 응답 읽기가 시간 초과되면 요청을 분할합니다. 시간 초과로 인한 분할은 최대 두 단계로 제한합니다. 모델이 새로 제안한 문제는 `rule_candidate.source=GEMINI`로 구분합니다. 적용 시점·법령 근거를 검증할 수 없으면 `NEEDS_CONFIRMATION`으로 저장합니다. 법령 원문을 임의 길이로 자르지 않으며, 토큰 사용량과 비용은 아직 실측하지 않았습니다.
+모든 조항과 문서 전체 누락 점검을 위해 RAG를 검색합니다. Gemini에는 조항 2개와 관련 후보를 한 묶음씩, 전체 누락 후보를 마지막 묶음으로 순차 요청합니다. 조항 묶음에는 해당 조항 원문을, 마지막 묶음에는 계약서 전체 조항과 앞선 검토 결과를 전달합니다. 법령 원문은 후보별로 해당 묶음에 넣습니다. 실패하면 재시도하거나 부분 결과를 저장하지 않고 job을 실패 처리합니다. 후보에 허용되지 않은 인용 ID는 버리고 해당 판단만 `NEEDS_CONFIRMATION`으로 남깁니다. 모델이 새로 제안한 문제는 `rule_candidate.source=GEMINI`로 구분합니다. 적용 시점·법령 근거를 검증할 수 없으면 `NEEDS_CONFIRMATION`으로 저장합니다. 법령 원문을 임의 길이로 자르지 않습니다.
 
 개발 환경에서는 [`/dev/analysis-test`](http://localhost:8000/dev/analysis-test)에서 이메일 회원가입·로그인 후 PDF 또는 JPG·PNG를 브라우저에서 읽고 텍스트를 직접 수정·마스킹한 뒤 기존 회원 인증·DB 분석 경로를 테스트할 수 있습니다. 파일 원본은 서버로 전송하지 않습니다. 분류·RAG·Gemini 설정이 필요하며, 전송한 텍스트와 결과는 회원 기록으로 남습니다. PDF/OCR 라이브러리와 한국어 모델은 브라우저가 CDN에서 내려받으므로 첫 실행에는 네트워크가 필요합니다. 이 개발용 화면과 공유 DB에는 가상 계약서 또는 충분히 마스킹한 테스트 문서만 사용합니다. 자동 개인정보 탐지는 이름·주소·계좌번호를 놓칠 수 있습니다.
 
-8개 필수 근로조건은 계약서 전체를 Gemini에 보내 매번 기재 여부를 확인합니다. 규칙은 위약금 예정, 명시적 최저임금 미달, 가산수당 배제, 휴게시간 부족의 **후보**와 계약상 불리함 후보를 찾습니다. 2026년 시급 기준은 [최저임금위원회 고시 현황](https://minimumwage.go.kr/minWage/policy/decisionMain.do)의 10,320원입니다. 다른 연도나 법령 근거가 확인되지 않으면 법적 판단은 `NEEDS_CONFIRMATION`으로 남깁니다. 마스킹된 원문과 법령은 Gemini API로 전송되며 모델 응답은 스키마와 인용 ID를 검증한 뒤에만 저장합니다. 현재 비동기 실행은 단일 서버 worker의 프로세스 내 BackgroundTasks를 사용합니다.
+8개 필수 근로조건은 계약서 전체를 Gemini에 보내 매번 기재 여부를 확인합니다. 규칙은 위약금 예정, 퇴직금 청구 포기·임금 포함, 명시적 최저임금 미달, 가산수당 배제, 휴게시간 부족의 **후보**와 계약상 불리함 후보를 찾습니다. 2026년 시급 기준은 [최저임금위원회 고시 현황](https://minimumwage.go.kr/minWage/policy/decisionMain.do)의 10,320원입니다. 확인된 2026년 고시를 인용했고 명시 시급이 기준보다 낮으면 `CAUTION`으로 표시하며 위법을 확정하지 않습니다. 다른 연도나 법령 근거가 확인되지 않으면 법적 판단은 `NEEDS_CONFIRMATION`으로 남깁니다. 마스킹된 원문과 법령은 Gemini API로 전송되며 모델 응답은 스키마와 인용 ID를 검증한 뒤에만 저장합니다. 현재 비동기 실행은 단일 서버 worker의 프로세스 내 BackgroundTasks를 사용합니다.
 
 ## 로컬 Chroma 검색 연결
 

@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     classifier_max_length: int = Field(default=256, ge=1, le=512)
     gemini_api_key: SecretStr = SecretStr("")
     gemini_model: str = Field(default="gemini-3.8-flash", pattern=r"^gemini-[a-zA-Z0-9.-]+$")
-    gemini_timeout_seconds: int = Field(default=60, ge=5, le=180)
+    gemini_timeout_seconds: int = Field(default=180, ge=5, le=180)
 
     @model_validator(mode="after")
     def validate_production(self):

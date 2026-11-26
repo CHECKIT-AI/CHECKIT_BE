@@ -63,10 +63,15 @@ def candidates(clauses: list[dict], context: dict) -> list[dict]:
                                      labels=("기타 근로조건",)))
         penalty = re.search(r"(퇴사|퇴직|계약\s*불이행|중도\s*해지).{0,45}(위약금|벌금|배상액|손해배상액).{0,25}(원|지급|배상)", text, re.S)
         penalty = penalty or re.search(r"(퇴사|퇴직|계약\s*불이행|중도\s*해지).{0,35}[\d,]+\s*만?원.{0,20}(위약금|벌금|배상)", text, re.S)
+        penalty = penalty or re.search(r"위약금\s*:.{0,120}(퇴사|퇴직|계약기간).{0,100}[\d,]+\s*만?\s*원", text, re.S)
         if penalty and not re.search(r"위약금\s*(?:없음|없다|미부과)", text):
             output.append(_candidate("PRESET_PENALTY", clause,
                                      explanation="근로계약 불이행에 대한 위약금·손해배상액 예정 문구 후보입니다.",
                                      labels=("손해배상·위약금",)))
+        if re.search(r"퇴직금.{0,100}(?:청구하지\s*않|청구를?\s*포기|월\s*임금에\s*포함|급여에\s*포함)", text, re.S):
+            output.append(_candidate("RETIREMENT_PAY_WAIVER", clause,
+                                     explanation="퇴직금 청구 포기 또는 임금 포함 문구 후보입니다.",
+                                     labels=("계약 종료",)))
 
         wage = re.search(r"(?:시급|시간급)\s*(?:은|:|=)?\s*([\d,]+)\s*원", text)
         if wage:

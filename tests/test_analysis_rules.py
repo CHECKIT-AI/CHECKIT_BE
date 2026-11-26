@@ -47,6 +47,14 @@ def test_explicit_problem_rules_and_application_conditions():
     assert next(x for x in found if x["check_code"] == "OVERTIME_PREMIUM")["status_hint"] == "CAUTION"
 
 
+def test_demo_penalty_and_retirement_waiver_create_separate_candidates():
+    rows = [clause("8. 위약금: 근로자가 계약기간 만료 전에 퇴사하는 경우, 교육비 및 채용 비용 명목으로 50만 원을 사업주에게 배상한다."),
+            clause("9. 퇴직금: 근로자는 퇴직금을 청구하지 않기로 하며, 퇴직금은 월 임금에 포함된 것으로 본다.", 2)]
+    found = candidates(rows, {"effective_date": "2026-11-01"})
+    assert {(item["check_code"], item["clause_id"]) for item in found} >= {
+        ("PRESET_PENALTY", "c1"), ("RETIREMENT_PAY_WAIVER", "c2")}
+
+
 def test_paged_stored_clauses_supply_source_ordinal_for_rule_candidates():
     first = "시급 9,800원으로 한다."
     content = first + "\n두 번째 조항"

@@ -164,6 +164,27 @@ def test_generic_quote_cannot_confirm_required_wage_components():
     assert answer.citation_chunk_ids == ["law:1"]
 
 
+def test_wage_payment_recovers_only_exact_positive_contract_text():
+    candidate = {"check_code": "MISSING_WAGE_PAYMENT", "category": "MISSING",
+                 "required_information": ["임금 지급 방법"], "source_locations": []}
+    clauses = {"c1": {"clause_id": "c1", "page": 1,
+                      "text": "임금: 시간급 9,500원. 매월 말일에 근로자 명의 계좌로 지급한다."}}
+    answer = Judgment(status="NEEDS_CONFIRMATION", explanation="확인 불가",
+                      document_presence="UNCLEAR")
+    jobs._recover_wage_payment_quote(candidate, answer, clauses)
+    jobs._resolve_missing(candidate, answer, clauses, False)
+    assert answer.document_presence == "PRESENT"
+    assert answer.document_quote in clauses["c1"]["text"]
+    assert answer.document_clause_id == "c1"
+    assert candidate["source_locations"] == [{"clause_id": "c1", "page": 1}]
+
+    answer = Judgment(status="NEEDS_CONFIRMATION", explanation="확인 불가",
+                      document_presence="UNCLEAR")
+    jobs._recover_wage_payment_quote(candidate, answer, {
+        "c1": {"clause_id": "c1", "text": "임금은 매월 말일에 지급하지 않는다."}})
+    assert answer.document_presence == "UNCLEAR"
+
+
 def test_saved_item_has_separate_presence_and_exact_document_quote():
     class SaveConn:
         def execute(self, sql, args):
@@ -263,13 +284,24 @@ def test_minimum_wage_candidate_receives_applicable_notice_without_changing_clau
                                 clause_hits, 5, "2026-11-01") == clause_hits["c1"]
 
 
-def test_worker_reviews_all_candidates_once_and_saves_only_after_judgment(monkeypatch):
+def test_review_batches_keep_each_clause_candidate_and_global_review_once():
+    clauses = [{"clause_id": f"c{i}"} for i in range(1, 4)]
+    reviews = [({"candidate_id": f"scan_{i}", "clause_id": f"c{i}"}, [])
+               for i in range(1, 4)]
+    reviews += [({"candidate_id": "rule_2", "clause_id": "c2"}, []),
+                ({"candidate_id": "missing", "clause_id": None}, [])]
+    batches = jobs._review_batches(clauses, reviews)
+    assert [[candidate["candidate_id"] for candidate, _ in batch] for batch in batches] == [
+        ["scan_1", "scan_2", "rule_2"], ["scan_3"], ["missing"]]
+
+
+def test_worker_reviews_clause_and_missing_batches_then_saves(monkeypatch):
     reviewed = []
     saved = []
 
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None):
-            reviewed.append((clauses, reviews))
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+            reviewed.append((clauses, reviews, clause_results))
             return {candidate["candidate_id"]: Judgment(
                 status="NEEDS_CONFIRMATION", explanation="확인 필요",
                 required_information=[], citation_chunk_ids=[])
@@ -284,27 +316,64 @@ def test_worker_reviews_all_candidates_once_and_saves_only_after_judgment(monkey
     monkeypatch.setattr(jobs, "_stage", lambda *args: None)
     monkeypatch.setattr(jobs, "_save_result", lambda *args: saved.append(args))
     jobs.run_job(app, CONTRACT_ID)
-    assert len(reviewed) == 1 and saved
+    assert len(reviewed) == 2 and saved
     assert reviewed[0][0][0]["text"] == "시급 9,000원으로 한다."
-    assert len({candidate["candidate_id"] for candidate, _ in reviewed[0][1]}) == len(reviewed[0][1])
-    assert len([candidate for candidate, _ in reviewed[0][1]
+    all_reviews = [row for _, batch, _ in reviewed for row in batch]
+    assert len({candidate["candidate_id"] for candidate, _ in all_reviews}) == len(all_reviews)
+    assert len([candidate for candidate, _ in reviewed[1][1]
                 if candidate["check_code"].startswith("MISSING_")]) == 8
-    assert len(saved[0][4]) == len([candidate for candidate, _ in reviewed[0][1]
+    assert len(saved[0][4]) == len([candidate for candidate, _ in all_reviews
                                    if candidate["category"] not in {"CLAUSE_SCAN", "DOCUMENT_SCAN"}])
     assert search.clauses == [reviewed[0][0][0]["clause_id"]]
-    assert {candidate["category"] for candidate, _ in reviewed[0][1]} >= {"CLAUSE_SCAN", "DOCUMENT_SCAN"}
+    assert {candidate["category"] for candidate, _ in reviewed[0][1]} >= {"CLAUSE_SCAN"}
+    assert {candidate["category"] for candidate, _ in reviewed[1][1]} >= {"DOCUMENT_SCAN", "MISSING"}
+    assert reviewed[0][2] is None
+    assert reviewed[1][2] and reviewed[1][2][0]["candidate_id"] == "scan_0001"
     assert app.state.database_pool.conn.failed_code is None
+
+
+def test_worker_marks_verified_2026_minimum_wage_gap_as_caution(monkeypatch):
+    saved = []
+    notice = {"chunk_id": "notice:2026", "content": "2026년 최저임금 시급 10,320원",
+              "metadata": {"source_type": "administrative_notice",
+                           "source_url": "https://www.minimumwage.go.kr/notice",
+                           "article_effective_date": "20260101", "is_deleted": False}}
+
+    class Search(WorkerSearch):
+        def annual_notice(self, effective_date):
+            return {"results": [notice], "warnings": []}
+
+    class Reviewer:
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+            return {candidate["candidate_id"]: Judgment(
+                status="NEEDS_CONFIRMATION", explanation="기본 시급이 고시보다 낮습니다.",
+                citation_chunk_ids=["notice:2026"] if candidate["check_code"] == "MINIMUM_WAGE" else [])
+                for candidate, _ in reviews}
+
+    app = SimpleNamespace(state=SimpleNamespace(
+        database_pool=WorkerPool(), classifier=SimpleNamespace(predict=lambda text: {
+            "labels": [], "model_id": "test/model", "revision": "test-revision"}),
+        rag_search=Search(), gemini_reviewer=Reviewer(),
+        settings=SimpleNamespace(rag_corpus="employment_basic_v004", gemini_model="gemini-test")))
+    monkeypatch.setattr(jobs, "_stage", lambda *args: None)
+    monkeypatch.setattr(jobs, "_save_result", lambda *args: saved.append(args))
+    jobs.run_job(app, CONTRACT_ID)
+    wage = next(answer for candidate, answer, _ in saved[0][4]
+                if candidate["check_code"] == "MINIMUM_WAGE")
+    assert wage.status == "CAUTION"
+    assert wage.citation_chunk_ids == ["notice:2026"]
 
 
 def test_worker_saves_discovered_issue_as_needs_confirmation_without_verified_law(monkeypatch):
     saved = []
 
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
             answers = {candidate["candidate_id"]: Judgment(
                 status="NEEDS_CONFIRMATION", explanation="확인 필요") for candidate, _ in reviews}
-            answers["scan_0001"].findings = [Finding(
-                category="LEGAL_RISK", explanation="추가 문제", citation_chunk_ids=[])]
+            if "scan_0001" in answers:
+                answers["scan_0001"].findings = [Finding(
+                    category="LEGAL_RISK", explanation="추가 문제", citation_chunk_ids=[])]
             return answers
 
     app = SimpleNamespace(state=SimpleNamespace(
@@ -348,7 +417,7 @@ def test_empty_result_summary_does_not_claim_contract_is_safe():
 
 def test_worker_records_sanitized_failure_code(monkeypatch):
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
             raise LLMUnavailable("provider secret details")
 
     app = SimpleNamespace(state=SimpleNamespace(
@@ -362,9 +431,31 @@ def test_worker_records_sanitized_failure_code(monkeypatch):
     assert app.state.database_pool.conn.recovery_action == "RETRY"
 
 
+def test_later_batch_failure_does_not_save_partial_result(monkeypatch):
+    saved = []
+
+    class Reviewer:
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+            if any(candidate["clause_id"] is None for candidate, _ in reviews):
+                raise LLMUnavailable("provider unavailable")
+            return {candidate["candidate_id"]: Judgment(
+                status="NEEDS_CONFIRMATION", explanation="확인 필요") for candidate, _ in reviews}
+
+    app = SimpleNamespace(state=SimpleNamespace(
+        database_pool=WorkerPool(), classifier=SimpleNamespace(predict=lambda text: {
+            "labels": [], "model_id": "test/model", "revision": "test-revision"}),
+        rag_search=WorkerSearch(), gemini_reviewer=Reviewer(),
+        settings=SimpleNamespace(rag_corpus="employment_basic_v004", gemini_model="gemini-test")))
+    monkeypatch.setattr(jobs, "_stage", lambda *args: None)
+    monkeypatch.setattr(jobs, "_save_result", lambda *args: saved.append(args))
+    jobs.run_job(app, CONTRACT_ID)
+    assert not saved
+    assert app.state.database_pool.conn.failed_code == "LLM_UNAVAILABLE"
+
+
 def test_worker_reports_unsplittable_input_without_retry(monkeypatch):
     class Reviewer:
-        def judge(self, clauses, reviews, context, correlation_id=None):
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
             raise LLMInputTooLarge("provider details")
 
     app = SimpleNamespace(state=SimpleNamespace(

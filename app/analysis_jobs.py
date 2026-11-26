@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 import logging
+import re
 from typing import Literal
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
@@ -217,6 +218,34 @@ def _verified_citations(chunk_ids, hits, effective_date):
     return True
 
 
+def _review_batches(clauses, reviews):
+    batches = []
+    for start in range(0, len(clauses), 2):
+        clause_ids = {clause["clause_id"] for clause in clauses[start:start + 2]}
+        batches.append([(candidate, hits) for candidate, hits in reviews
+                        if candidate["clause_id"] in clause_ids])
+    whole_document = [(candidate, hits) for candidate, hits in reviews
+                      if candidate["clause_id"] is None]
+    if whole_document:
+        batches.append(whole_document)
+    return [batch for batch in batches if batch]
+
+
+def _recover_wage_payment_quote(candidate, answer, clauses):
+    if candidate["check_code"] != "MISSING_WAGE_PAYMENT" or answer.document_presence == "PRESENT":
+        return
+    for clause in clauses.values():
+        if not re.search(r"임금|급여|월급|시급|시간급", clause["text"]):
+            continue
+        match = re.search(r"(?:매월\s*(?:말일|\d{1,2}일)|(?:본인|근로자)\s*명의\s*계좌)"
+                          r".{0,80}?지급(?!하지\s*않|하지\s*못)", clause["text"], re.S)
+        if match:
+            answer.document_presence = "PRESENT"
+            answer.document_quote = match.group()
+            answer.document_clause_id = clause["clause_id"]
+            return
+
+
 def _resolve_missing(candidate, answer, clauses_by_id, verified):
     name = candidate["required_information"][0]
     if answer.document_presence is None:
@@ -406,7 +435,28 @@ def run_job(app, job_id: UUID):
         step_detail = "-"
         _stage(pool, job_id, stage)
         logger.info("Analysis evaluation started: job_id=%s review_count=%d", job_id, len(reviews))
-        answers = reviewer.judge(clauses, reviews, job["analysis_context"], str(job_id))
+        answers = {}
+        for index, batch in enumerate(_review_batches(clauses, reviews), 1):
+            step_detail = f"batch_{index}"
+            document_review = all(candidate["clause_id"] is None for candidate, _ in batch)
+            if document_review:
+                clause_results = [{
+                    "candidate_id": candidate["candidate_id"],
+                    "clause_id": candidate["clause_id"],
+                    "check_code": candidate["check_code"],
+                    "status": answers[candidate["candidate_id"]].status,
+                    "explanation": answers[candidate["candidate_id"]].explanation,
+                    "findings": [finding.model_dump() for finding in
+                                 answers[candidate["candidate_id"]].findings],
+                } for candidate, _ in reviews if candidate["clause_id"] is not None]
+                answers.update(reviewer.judge(
+                    clauses, batch, job["analysis_context"], str(job_id), clause_results))
+            else:
+                clause_ids = {candidate["clause_id"] for candidate, _ in batch}
+                batch_clauses = [clause for clause in clauses if clause["clause_id"] in clause_ids]
+                answers.update(reviewer.judge(
+                    batch_clauses, batch, job["analysis_context"], str(job_id)))
+        step_detail = "-"
         logger.info("Analysis evaluation completed: job_id=%s answer_count=%d",
                     job_id, len(answers))
         step = "result_validation"
@@ -440,10 +490,17 @@ def run_job(app, job_id: UUID):
             verified = bool(effective and answer.citation_chunk_ids and
                             _verified_citations(answer.citation_chunk_ids, hits, date.fromisoformat(effective)))
             if candidate["category"] == "MISSING":
+                _recover_wage_payment_quote(candidate, answer, clauses_by_id)
                 _resolve_missing(candidate, answer, clauses_by_id,
                                  bool(verified and date.fromisoformat(effective).year == 2026))
                 decisions.append((candidate, answer, hits))
                 continue
+            if (candidate["check_code"] == "MINIMUM_WAGE" and
+                    candidate["status_hint"] == "CAUTION" and verified and
+                    any(hit["chunk_id"] in answer.citation_chunk_ids and
+                        hit["metadata"].get("source_type") == "administrative_notice"
+                        for hit in hits)):
+                answer.status = "CAUTION"
             if candidate["category"] == "DISADVANTAGE" and not verified:
                 answer.citation_chunk_ids = []
             if candidate["category"] != "DISADVANTAGE" and (

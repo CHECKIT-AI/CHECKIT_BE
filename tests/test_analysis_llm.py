@@ -64,14 +64,40 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     assert "irrelevant" not in prompt["law_hits"][0]["metadata"]
     assert [candidate["law_chunk_ids"] for candidate in prompt["candidates"]] == [["law:1"], ["law:1"]]
     rules = " ".join(prompt["rules"])
-    assert PROMPT_VERSION == "employment_review_v8"
+    assert PROMPT_VERSION == "employment_review_v11"
+    assert prompt["task"] == (
+        "각 조항을 관련 법령 원문과 대조해 해당 문구에 법적 문제가 있는지 검토하세요. "
+        "위법을 확정하지 마세요."
+    )
     assert "제공된 law_hits의 실제 내용에서만" in rules
     assert "검색 순서나 법령 제목만으로 근거를 고르지 말고" in rules
     assert "그 candidate_id의 law_chunk_ids에 있는 ID" in rules
     assert "근거가 없으면 finding을 만들지 마세요" in rules
-    assert "document_presence" in rules
-    assert "부속합의서·별도 서면" in rules
+    assert "CLAUSE_SCAN은 해당 조항" in rules
     assert calls[0]["json"]["generationConfig"]["responseMimeType"] == "application/json"
+
+
+def test_document_review_receives_whole_contract_and_clause_results(monkeypatch):
+    calls = []
+
+    def post(self, url, **kwargs):
+        calls.append(json.loads(kwargs["json"]["contents"][0]["parts"][0]["text"]))
+        return response(url, result_for(["candidate_0001"]))
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    clauses = [{"clause_id": "c1", "text": "임금 조항"},
+               {"clause_id": "c2", "text": "근무 장소 조항"}]
+    prior = [{"candidate_id": "scan_0001", "clause_id": "c1",
+              "status": "CAUTION", "explanation": "검토 결과", "findings": []}]
+    reviewer().judge(clauses, reviews()[:1], {}, clause_results=prior)
+    assert calls[0]["document_clauses"] == clauses
+    assert calls[0]["clause_review_results"] == prior
+    assert "누락" in calls[0]["task"]
+    rules = " ".join(calls[0]["rules"])
+    assert "부속합의서·별도 서면" in rules
+    assert "제공된 MISSING 후보" in rules
+    assert "DOCUMENT_SCAN은" in rules
+    assert "CLAUSE_SCAN은" not in rules
 
 
 @pytest.mark.parametrize("body", [
@@ -219,7 +245,7 @@ def test_document_presence_requires_exact_contract_quote(monkeypatch):
         body = result_for(["candidate_0001", "candidate_0002"])
         items = json.loads(body["candidates"][0]["content"]["parts"][0]["text"])
         items["items"][0].update(document_presence="PRESENT", document_quote="없는 문구",
-                                 document_clause_id="c1")
+                                 document_clause_id="c1", citation_chunk_ids=["law:1"])
         items["items"][1]["citation_chunk_ids"] = ["law:1"]
         body["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(items)
         return response(url, body)
@@ -229,7 +255,7 @@ def test_document_presence_requires_exact_contract_quote(monkeypatch):
     assert calls == [1]
     assert answers["candidate_0001"].document_presence == "UNCLEAR"
     assert answers["candidate_0001"].document_quote is None
-    assert answers["candidate_0001"].citation_chunk_ids == []
+    assert answers["candidate_0001"].citation_chunk_ids == ["law:1"]
     assert answers["candidate_0001"].status == "NEEDS_CONFIRMATION"
     assert answers["candidate_0002"].citation_chunk_ids == ["law:1"]
 

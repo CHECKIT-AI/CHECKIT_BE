@@ -501,6 +501,14 @@ def run_job(app, job_id: UUID):
                         hit["metadata"].get("source_type") == "administrative_notice"
                         for hit in hits)):
                 answer.status = "CAUTION"
+            if answer.status == "NO_ISSUE_FOUND":
+                if candidate["category"] == "DISADVANTAGE" or (
+                    verified and date.fromisoformat(effective).year == 2026
+                ):
+                    continue
+                answer.status = "NEEDS_CONFIRMATION"
+                answer.citation_chunk_ids = []
+                answer.explanation = "적용 시점과 법령 근거를 검증할 수 없어 판단을 보류합니다."
             if candidate["category"] == "DISADVANTAGE" and not verified:
                 answer.citation_chunk_ids = []
             if candidate["category"] != "DISADVANTAGE" and (

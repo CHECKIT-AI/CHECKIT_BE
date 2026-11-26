@@ -64,7 +64,7 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     assert "irrelevant" not in prompt["law_hits"][0]["metadata"]
     assert [candidate["law_chunk_ids"] for candidate in prompt["candidates"]] == [["law:1"], ["law:1"]]
     rules = " ".join(prompt["rules"])
-    assert PROMPT_VERSION == "employment_review_v11"
+    assert PROMPT_VERSION == "employment_review_v12"
     assert prompt["task"] == (
         "각 조항을 관련 법령 원문과 대조해 해당 문구에 법적 문제가 있는지 검토하세요. "
         "위법을 확정하지 마세요."
@@ -74,6 +74,7 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     assert "그 candidate_id의 law_chunk_ids에 있는 ID" in rules
     assert "근거가 없으면 finding을 만들지 마세요" in rules
     assert "CLAUSE_SCAN은 해당 조항" in rules
+    assert "NO_ISSUE_FOUND" in rules
     assert calls[0]["json"]["generationConfig"]["responseMimeType"] == "application/json"
 
 
@@ -98,6 +99,7 @@ def test_document_review_receives_whole_contract_and_clause_results(monkeypatch)
     assert "제공된 MISSING 후보" in rules
     assert "DOCUMENT_SCAN은" in rules
     assert "CLAUSE_SCAN은" not in rules
+    assert "NO_ISSUE_FOUND" not in rules
 
 
 @pytest.mark.parametrize("body", [

@@ -332,6 +332,49 @@ def test_worker_reviews_clause_and_missing_batches_then_saves(monkeypatch):
     assert app.state.database_pool.conn.failed_code is None
 
 
+def test_no_issue_candidate_is_skipped_only_with_verified_law(monkeypatch):
+    hit = {"chunk_id": "law:1", "content": "조문 원문", "metadata": {
+        "source_url": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=1",
+        "article_effective_date": "20260101", "is_deleted": False}}
+    monkeypatch.setattr(jobs, "stored_clauses", lambda *args: [{
+        "clause_id": "c1", "text": "검토할 조항", "page": 1}])
+    monkeypatch.setattr(jobs, "candidates", lambda *args: [{
+        "candidate_id": "ignored", "check_code": "PRESET_PENALTY", "category": "LEGAL_RISK",
+        "clause_id": "c1", "quoted_text": "검토할 조항", "labels": [],
+        "status_hint": "CAUTION", "explanation": "위험 후보", "required_information": [],
+        "source_locations": [{"clause_id": "c1"}]}])
+    monkeypatch.setattr(jobs, "_stage", lambda *args: None)
+
+    class Search(WorkerSearch):
+        def __init__(self, hits):
+            super().__init__()
+            self.hits = hits
+
+        def search_clause(self, clause_id, text, labels, top_k):
+            return {"corpus": "employment_basic_v004", "results": self.hits}
+
+    class Reviewer:
+        def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
+            return {candidate["candidate_id"]: Judgment(
+                status="NO_ISSUE_FOUND", explanation="제공된 근거에서 해당 위험을 발견하지 못했습니다.",
+                citation_chunk_ids=["law:1"] if hits else [])
+                for candidate, _ in reviews}
+
+    for hits, expected_status in (([hit], None), ([], "NEEDS_CONFIRMATION")):
+        saved = []
+        monkeypatch.setattr(jobs, "_save_result", lambda *args: saved.append(args))
+        app = SimpleNamespace(state=SimpleNamespace(
+            database_pool=WorkerPool(), classifier=SimpleNamespace(predict=lambda text: {
+                "labels": [], "model_id": "test/model", "revision": "test-revision"}),
+            rag_search=Search(hits), gemini_reviewer=Reviewer(),
+            settings=SimpleNamespace(rag_corpus="employment_basic_v004", gemini_model="gemini-test")))
+        jobs.run_job(app, CONTRACT_ID)
+        assert app.state.database_pool.conn.failed_code is None
+        decisions = saved[0][4]
+        assert [answer.status for _, answer, _ in decisions] == (
+            [] if expected_status is None else [expected_status])
+
+
 def test_worker_marks_verified_2026_minimum_wage_gap_as_caution(monkeypatch):
     saved = []
     notice = {"chunk_id": "notice:2026", "content": "2026년 최저임금 시급 10,320원",
@@ -346,7 +389,8 @@ def test_worker_marks_verified_2026_minimum_wage_gap_as_caution(monkeypatch):
     class Reviewer:
         def judge(self, clauses, reviews, context, correlation_id=None, clause_results=None):
             return {candidate["candidate_id"]: Judgment(
-                status="NEEDS_CONFIRMATION", explanation="기본 시급이 고시보다 낮습니다.",
+                status="NO_ISSUE_FOUND" if candidate["check_code"] == "MINIMUM_WAGE" else "NEEDS_CONFIRMATION",
+                explanation="기본 시급이 고시보다 낮습니다.",
                 citation_chunk_ids=["notice:2026"] if candidate["check_code"] == "MINIMUM_WAGE" else [])
                 for candidate, _ in reviews}
 

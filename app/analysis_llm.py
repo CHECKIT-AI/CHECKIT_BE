@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 
 
-PROMPT_VERSION = "employment_review_v11"
+PROMPT_VERSION = "employment_review_v12"
 logger = logging.getLogger(__name__)
 LAW_METADATA = (
     "law_id", "law_name", "article_id", "article_no", "version_id",
@@ -27,7 +27,7 @@ class Finding(BaseModel):
 
 class Judgment(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    status: str = Field(pattern=r"^(CAUTION|MISSING_SUSPECTED|NEEDS_CONFIRMATION|PRESENT)$")
+    status: str = Field(pattern=r"^(CAUTION|MISSING_SUSPECTED|NEEDS_CONFIRMATION|PRESENT|NO_ISSUE_FOUND)$")
     explanation: str = Field(min_length=1, max_length=2000)
     required_information: list[str] = Field(default_factory=list, max_length=10)
     citation_chunk_ids: list[str] = Field(default_factory=list, max_length=10)
@@ -136,6 +136,8 @@ class GeminiReviewer:
             ] if document_review else [
                 "DISADVANTAGE는 법 위반 여부와 구분해 불리할 수 있는 이유만 설명하세요.",
                 "CLAUSE_SCAN은 해당 조항에서 기존 후보에 없는 문제를 findings에 담으세요.",
+                "조항의 기존 LEGAL_RISK 후보는 관련 법령의 적용 요건과 계약 문구를 대조하세요. 요건에 해당하지 않아 해당 위험을 발견하지 못했고 이를 뒷받침하는 조문이 있으면 NO_ISSUE_FOUND와 그 citation_chunk_ids로 답하세요. 법령이나 적용 사실이 부족하면 NEEDS_CONFIRMATION으로 답하세요. NO_ISSUE_FOUND는 계약 전체의 적법성 보장이 아닙니다.",
+                "조항의 기존 DISADVANTAGE 후보도 문구를 검토해 불리함이 발견되지 않으면 NO_ISSUE_FOUND로 답하세요.",
             ]) + [
                 "MISSING 외 후보는 document_presence, document_quote, document_clause_id를 모두 null로 답하세요. status와 explanation이 서로 모순되면 안 됩니다.",
                 "각 finding은 LEGAL_RISK, MISSING, DISADVANTAGE 중 하나입니다. LEGAL_RISK와 MISSING은 해당 scan의 law_chunk_ids에 연결된 법령 내용이 직접 뒷받침할 때만 작성하세요. finding의 citation_chunk_ids도 그 scan의 ID만 정확히 복사하고, 근거가 없으면 finding을 만들지 마세요.",
@@ -154,7 +156,7 @@ class GeminiReviewer:
             "type": "OBJECT", "properties": {
                 "candidate_id": {"type": "STRING"},
                 "status": {"type": "STRING", "enum": [
-                    "CAUTION", "MISSING_SUSPECTED", "NEEDS_CONFIRMATION", "PRESENT"
+                    "CAUTION", "MISSING_SUSPECTED", "NEEDS_CONFIRMATION", "PRESENT", "NO_ISSUE_FOUND"
                 ]},
                 "explanation": {"type": "STRING"},
                 "required_information": {"type": "ARRAY", "items": {"type": "STRING"}},

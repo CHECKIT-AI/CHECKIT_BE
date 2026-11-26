@@ -1,0 +1,274 @@
+{
+  "method": "FastAPI TestClient; real API routes, DB, classifier, RAG, Gemini; gold file not read",
+  "cases": [
+    {
+      "case_id": "C04",
+      "contract_file": "C04-unconfirmed-attachment.txt",
+      "input_sha256": "c293e4370fe9ddd49588b82c5eaf15c7e2de40768d51013aa0375df4216a8f76",
+      "contract_id": "1614f681-bca7-43a6-9e5e-c33806840794",
+      "elapsed_seconds": 17.03,
+      "job_id": "8c77afb9-9c82-457a-a128-e84606019b97",
+      "job_status": "SUCCEEDED",
+      "job_stage": "EXPLAIN",
+      "error_code": null,
+      "model_versions": {
+        "gemini_model": "gemini-3.1-flash-lite",
+        "classifier_model": "hur03/checkit-contract-classifier-multilabel-hard-v1",
+        "classifier_revision": "5f2a15e5fb7538c1ac0d0c12de4c65cf1c9e9e23"
+      },
+      "corpus_version": "employment_basic_v004",
+      "rule_version": "employment_rules_v1",
+      "summary": "9개 조항, 8개 항목 검토: CAUTION 0건, MISSING_SUSPECTED 0건, NEEDS_CONFIRMATION 8건, PRESENT 0건",
+      "items": [
+        {
+          "check_code": "MISSING_SCHEDULED_HOURS",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "PRESENT",
+          "quoted_text": "월요일부터 금요일까지 09:00~18:00, 휴게 12:00~13:00, 1일 8시간·주 40시간.",
+          "explanation": "계약서 기재는 확인했지만 적용 법령 근거를 검증하지 못했습니다.",
+          "required_information": [
+            "소정근로시간"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "근로시간"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_SCHEDULED_HOURS",
+            "explanation": "소정근로시간의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0004",
+            "source_locations": [
+              {
+                "page": 1,
+                "clause_id": "1614f681-bca7-43a6-9e5e-c33806840794:c0003"
+              }
+            ],
+            "retrieval_warnings": [],
+            "required_information": [
+              "소정근로시간"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_HOLIDAY",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "PRESENT",
+          "quoted_text": "매주 일요일을 유급 주휴일로 한다.",
+          "explanation": "계약서 기재는 확인했지만 적용 법령 근거를 검증하지 못했습니다.",
+          "required_information": [
+            "휴일"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "휴일"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_HOLIDAY",
+            "explanation": "휴일의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0005",
+            "source_locations": [
+              {
+                "page": 1,
+                "clause_id": "1614f681-bca7-43a6-9e5e-c33806840794:c0006"
+              }
+            ],
+            "retrieval_warnings": [],
+            "required_information": [
+              "휴일"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_WAGE_PAYMENT",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "UNCLEAR",
+          "quoted_text": null,
+          "explanation": "계약서 기재 여부를 확인하지 못했습니다.",
+          "required_information": [
+            "임금 지급 방법"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "임금"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WAGE_PAYMENT",
+            "explanation": "임금 지급 방법의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0003",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "임금 지급 방법"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_ANNUAL_LEAVE",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "UNCLEAR",
+          "quoted_text": null,
+          "explanation": "계약서 기재 여부를 확인하지 못했습니다.",
+          "required_information": [
+            "연차 유급휴가"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "휴가"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_ANNUAL_LEAVE",
+            "explanation": "연차 유급휴가의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0006",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "연차 유급휴가"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_WORKPLACE",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "PRESENT",
+          "quoted_text": "대전 소재 본사 사무실.",
+          "explanation": "계약서 기재는 확인했지만 적용 법령 근거를 검증하지 못했습니다.",
+          "required_information": [
+            "근무 장소"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "근무 장소·업무"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WORKPLACE",
+            "explanation": "근무 장소의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0007",
+            "source_locations": [
+              {
+                "page": 1,
+                "clause_id": "1614f681-bca7-43a6-9e5e-c33806840794:c0002"
+              }
+            ],
+            "retrieval_warnings": [],
+            "required_information": [
+              "근무 장소"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_WAGE_COMPONENTS",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "PRESENT",
+          "quoted_text": "기본급 월 2,400,000원, 식대 월 100,000원.",
+          "explanation": "계약서 기재는 확인했지만 적용 법령 근거를 검증하지 못했습니다.",
+          "required_information": [
+            "임금 구성 항목"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "임금"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WAGE_COMPONENTS",
+            "explanation": "임금 구성 항목의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0001",
+            "source_locations": [
+              {
+                "page": 1,
+                "clause_id": "1614f681-bca7-43a6-9e5e-c33806840794:c0004"
+              }
+            ],
+            "retrieval_warnings": [],
+            "required_information": [
+              "임금 구성 항목"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_WAGE_CALCULATION",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "PRESENT",
+          "quoted_text": "기본급은 월정액으로, 월중 입·퇴사 시 재직일수에 비례해 계산한다.",
+          "explanation": "계약서 기재는 확인했지만 적용 법령 근거를 검증하지 못했습니다.",
+          "required_information": [
+            "임금 계산 방법"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "임금"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WAGE_CALCULATION",
+            "explanation": "임금 계산 방법의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0002",
+            "source_locations": [
+              {
+                "page": 1,
+                "clause_id": "1614f681-bca7-43a6-9e5e-c33806840794:c0005"
+              }
+            ],
+            "retrieval_warnings": [],
+            "required_information": [
+              "임금 계산 방법"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_DUTIES",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "UNCLEAR",
+          "quoted_text": null,
+          "explanation": "계약서 기재 여부를 확인하지 못했습니다.",
+          "required_information": [
+            "종사할 업무"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "근무 장소·업무"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_DUTIES",
+            "explanation": "종사할 업무의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0008",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "종사할 업무"
+            ]
+          }
+        }
+      ],
+      "citation_count": 3
+    }
+  ],
+  "cleanup": [
+    {
+      "contract_id": "1614f681-bca7-43a6-9e5e-c33806840794",
+      "http_status": 204
+    }
+  ]
+}

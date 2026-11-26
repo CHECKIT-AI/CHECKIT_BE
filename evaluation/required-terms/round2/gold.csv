@@ -1,0 +1,33 @@
+case_id,contract_file,effective_date,workplace_conditions,check_code,item,document_presence,evidence,legal_basis,needed_to_resolve,review_status
+N01,N01-complete-alternative.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,WAGE_COMPONENTS,임금 구성항목,PRESENT,"급여는 기본급 월 2,600,000원과 교통비 월 100,000원으로 구성한다.",근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N01,N01-complete-alternative.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,WAGE_CALCULATION,임금 계산방법,PRESENT,기본급과 교통비는 월정액이며 월중 입사하거나 퇴사하면 해당 월의 재직일수에 비례해 산정한다.,근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N01,N01-complete-alternative.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,WAGE_PAYMENT,임금 지급방법,PRESENT,급여는 매월 말일에 근로자 명의 은행 계좌로 입금한다.,근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N01,N01-complete-alternative.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,SCHEDULED_HOURS,소정근로시간,PRESENT,"월요일부터 금요일까지 08:30~17:30에 근무하며 12:30~13:30에 쉰다. 하루 8시간, 주 40시간을 소정근로시간으로 한다.",근로기준법 제17조 제1항 제2호·제2항,,PENDING_EXPERT_REVIEW
+N01,N01-complete-alternative.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,HOLIDAY,휴일,PRESENT,매주 일요일은 유급 주휴일로 한다.,근로기준법 제17조 제1항 제3호·제2항,,PENDING_EXPERT_REVIEW
+N01,N01-complete-alternative.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,ANNUAL_LEAVE,연차 유급휴가,PRESENT,연차 유급휴가는 근로기준법 제60조에 따라 부여한다.,근로기준법 제17조 제1항 제4호·제2항; 제60조,,PENDING_EXPERT_REVIEW
+N01,N01-complete-alternative.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,WORKPLACE,취업 장소,PRESENT,일할 곳은 인천 소재 자료관리센터이다.,근로기준법 제17조 제1항 제5호; 근로기준법 시행령 제8조 제1호,,PENDING_EXPERT_REVIEW
+N01,N01-complete-alternative.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,DUTIES,종사할 업무,PRESENT,맡을 일은 자료 분류와 대출 기록 정리이다.,근로기준법 제17조 제1항 제5호; 근로기준법 시행령 제8조 제1호,,PENDING_EXPERT_REVIEW
+N02,N02-low-wage-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,WAGE_COMPONENTS,임금 구성항목,PRESENT,"임금 구성은 기본 시급 9,000원이며 별도 수당은 없다.",근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N02,N02-low-wage-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,WAGE_CALCULATION,임금 계산방법,PRESENT,"임금은 실제 근로시간에 시급 9,000원을 곱해 계산한다.",근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N02,N02-low-wage-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,WAGE_PAYMENT,임금 지급방법,ABSENT,,근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N02,N02-low-wage-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,SCHEDULED_HOURS,소정근로시간,PRESENT,"소정근로시간은 월요일부터 금요일까지 10:00~19:00, 휴게 13:00~14:00, 하루 8시간·주 40시간이다.",근로기준법 제17조 제1항 제2호·제2항,,PENDING_EXPERT_REVIEW
+N02,N02-low-wage-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,HOLIDAY,휴일,ABSENT,,근로기준법 제17조 제1항 제3호·제2항,,PENDING_EXPERT_REVIEW
+N02,N02-low-wage-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,ANNUAL_LEAVE,연차 유급휴가,PRESENT,연차 유급휴가는 근로기준법 제60조에 따라 부여한다.,근로기준법 제17조 제1항 제4호·제2항; 제60조,,PENDING_EXPERT_REVIEW
+N02,N02-low-wage-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,WORKPLACE,취업 장소,PRESENT,취업 장소는 광주 소재 판매점이다.,근로기준법 제17조 제1항 제5호; 근로기준법 시행령 제8조 제1호,,PENDING_EXPERT_REVIEW
+N02,N02-low-wage-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 부속 문서 없음,DUTIES,종사할 업무,ABSENT,,근로기준법 제17조 제1항 제5호; 근로기준법 시행령 제8조 제1호,,PENDING_EXPERT_REVIEW
+N03,N03-penalty-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간 예정이나 계약서에 시간표 없음; 부속 문서 없음,WAGE_COMPONENTS,임금 구성항목,PRESENT,"임금 구성은 기본급 월 2,600,000원과 식대 월 100,000원이다.",근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N03,N03-penalty-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간 예정이나 계약서에 시간표 없음; 부속 문서 없음,WAGE_CALCULATION,임금 계산방법,ABSENT,,근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N03,N03-penalty-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간 예정이나 계약서에 시간표 없음; 부속 문서 없음,WAGE_PAYMENT,임금 지급방법,PRESENT,임금은 매월 25일에 근로자 명의 계좌로 이체한다.,근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N03,N03-penalty-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간 예정이나 계약서에 시간표 없음; 부속 문서 없음,SCHEDULED_HOURS,소정근로시간,ABSENT,,근로기준법 제17조 제1항 제2호·제2항,,PENDING_EXPERT_REVIEW
+N03,N03-penalty-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간 예정이나 계약서에 시간표 없음; 부속 문서 없음,HOLIDAY,휴일,PRESENT,휴일은 매주 일요일로 하며 유급으로 한다.,근로기준법 제17조 제1항 제3호·제2항,,PENDING_EXPERT_REVIEW
+N03,N03-penalty-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간 예정이나 계약서에 시간표 없음; 부속 문서 없음,ANNUAL_LEAVE,연차 유급휴가,ABSENT,,근로기준법 제17조 제1항 제4호·제2항; 제60조,,PENDING_EXPERT_REVIEW
+N03,N03-penalty-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간 예정이나 계약서에 시간표 없음; 부속 문서 없음,WORKPLACE,취업 장소,ABSENT,,근로기준법 제17조 제1항 제5호; 근로기준법 시행령 제8조 제1호,,PENDING_EXPERT_REVIEW
+N03,N03-penalty-and-omissions.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간 예정이나 계약서에 시간표 없음; 부속 문서 없음,DUTIES,종사할 업무,PRESENT,담당 업무는 온라인 주문 접수와 주문 내역 정리이다.,근로기준법 제17조 제1항 제5호; 근로기준법 시행령 제8조 제1호,,PENDING_EXPERT_REVIEW
+N04,N04-unprovided-annex-and-break.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 별첨 A 미제출,WAGE_COMPONENTS,임금 구성항목,PRESENT,"임금은 기본급 월 2,600,000원과 식대 월 100,000원으로 구성한다.",근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N04,N04-unprovided-annex-and-break.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 별첨 A 미제출,WAGE_CALCULATION,임금 계산방법,PRESENT,"기본급과 식대는 월정액으로, 월중 입·퇴사 시 재직일수에 비례해 계산한다.",근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N04,N04-unprovided-annex-and-break.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 별첨 A 미제출,WAGE_PAYMENT,임금 지급방법,PRESENT,매월 25일에 근로자 명의 계좌로 임금을 지급한다.,근로기준법 제17조 제1항 제1호·제2항,,PENDING_EXPERT_REVIEW
+N04,N04-unprovided-annex-and-break.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 별첨 A 미제출,SCHEDULED_HOURS,소정근로시간,PRESENT,소정근로시간은 월요일부터 금요일까지 10:00~18:30이며 휴게는 13:00~13:30이다. 하루 8시간·주 40시간 근로한다.,근로기준법 제17조 제1항 제2호·제2항,,PENDING_EXPERT_REVIEW
+N04,N04-unprovided-annex-and-break.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 별첨 A 미제출,HOLIDAY,휴일,UNCLEAR,주휴일 등 휴일의 내용은 별첨 A에 정한다.,근로기준법 제17조 제1항 제3호·제2항,별첨 A 제출 여부와 내용,PENDING_EXPERT_REVIEW
+N04,N04-unprovided-annex-and-break.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 별첨 A 미제출,ANNUAL_LEAVE,연차 유급휴가,UNCLEAR,연차 유급휴가의 내용은 별첨 A에 정한다.,근로기준법 제17조 제1항 제4호·제2항; 제60조,별첨 A 제출 여부와 내용,PENDING_EXPERT_REVIEW
+N04,N04-unprovided-annex-and-break.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 별첨 A 미제출,WORKPLACE,취업 장소,PRESENT,취업 장소는 서울 소재 본사 사무실이다.,근로기준법 제17조 제1항 제5호; 근로기준법 시행령 제8조 제1호,,PENDING_EXPERT_REVIEW
+N04,N04-unprovided-annex-and-break.txt,2026-11-01,상시 근로자 10명; 통상근로 주 40시간; 별첨 A 미제출,DUTIES,종사할 업무,UNCLEAR,담당 업무의 세부 내용은 별첨 A에 정한다.,근로기준법 제17조 제1항 제5호; 근로기준법 시행령 제8조 제1호,별첨 A 제출 여부와 내용,PENDING_EXPERT_REVIEW

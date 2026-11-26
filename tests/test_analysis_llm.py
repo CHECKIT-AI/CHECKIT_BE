@@ -80,7 +80,7 @@ def test_one_gemini_call_deduplicates_law_and_contract_text(monkeypatch):
     result_for(["candidate_0001"]),
     result_for(["candidate_0001", "candidate_0001"]),
 ])
-def test_missing_duplicate_or_untrusted_answers_retry_then_fail(monkeypatch, body):
+def test_missing_duplicate_or_untrusted_answers_fail_without_retry(monkeypatch, body):
     calls = []
 
     def post(self, url, **kwargs):
@@ -90,7 +90,7 @@ def test_missing_duplicate_or_untrusted_answers_retry_then_fail(monkeypatch, bod
     monkeypatch.setattr(httpx.Client, "post", post)
     with pytest.raises(LLMUnavailable):
         reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 def test_rejected_response_logs_fixed_reason_without_contract_text(monkeypatch, caplog):
@@ -103,68 +103,49 @@ def test_rejected_response_logs_fixed_reason_without_contract_text(monkeypatch, 
     assert "private contract content" not in caplog.text
 
 
-def test_input_limit_splits_only_after_provider_rejects_batch(monkeypatch):
+def test_input_limit_reports_failure_without_splitting(monkeypatch):
     calls = []
 
     def post(self, url, **kwargs):
         prompt = json.loads(kwargs["json"]["contents"][0]["parts"][0]["text"])
         candidate_ids = [candidate["candidate_id"] for candidate in prompt["candidates"]]
         calls.append(candidate_ids)
-        if len(candidate_ids) > 1:
-            return httpx.Response(413, request=httpx.Request("POST", url))
-        return response(url, result_for(candidate_ids))
-
-    monkeypatch.setattr(httpx.Client, "post", post)
-    answers = reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
-    assert set(answers) == {"candidate_0001", "candidate_0002"}
-    assert calls == [["candidate_0001", "candidate_0002"],
-                     ["candidate_0001"], ["candidate_0002"]]
-
-    def too_large(self, url, **kwargs):
         return httpx.Response(413, request=httpx.Request("POST", url))
 
-    monkeypatch.setattr(httpx.Client, "post", too_large)
+    monkeypatch.setattr(httpx.Client, "post", post)
     with pytest.raises(LLMInputTooLarge):
-        reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews()[:1], {})
+        reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
+    assert calls == [["candidate_0001", "candidate_0002"]]
 
 
-def test_read_timeout_splits_batch_and_keeps_all_answers(monkeypatch):
+def test_read_timeout_fails_without_splitting(monkeypatch):
     calls = []
 
     def post(self, url, **kwargs):
         prompt = json.loads(kwargs["json"]["contents"][0]["parts"][0]["text"])
         ids = [candidate["candidate_id"] for candidate in prompt["candidates"]]
         calls.append(ids)
-        if len(ids) > 1:
-            raise httpx.ReadTimeout("provider response timed out")
-        return response(url, result_for(ids))
+        raise httpx.ReadTimeout("provider response timed out")
 
     monkeypatch.setattr(httpx.Client, "post", post)
-    answers = reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
-    assert set(answers) == {"candidate_0001", "candidate_0002"}
-    assert calls == [["candidate_0001", "candidate_0002"],
-                     ["candidate_0001"], ["candidate_0002"]]
+    with pytest.raises(LLMUnavailable):
+        reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
+    assert calls == [["candidate_0001", "candidate_0002"]]
 
 
-def test_read_timeout_retries_single_review_and_bounds_batch_splits(monkeypatch):
+@pytest.mark.parametrize("status", [503, 429])
+def test_provider_error_stops_after_one_call(monkeypatch, status):
     calls = []
 
     def post(self, url, **kwargs):
         prompt = json.loads(kwargs["json"]["contents"][0]["parts"][0]["text"])
         calls.append(len(prompt["candidates"]))
-        raise httpx.ReadTimeout("provider response timed out")
+        return httpx.Response(status, request=httpx.Request("POST", url))
 
     monkeypatch.setattr(httpx.Client, "post", post)
     with pytest.raises(LLMUnavailable):
-        reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews()[:1], {})
-    assert calls == [1, 1]
-
-    calls.clear()
-    base, hits = reviews()[1]
-    rows = [({**base, "candidate_id": f"candidate_{i:04d}"}, hits) for i in range(8)]
-    with pytest.raises(LLMUnavailable):
-        reviewer().judge([{"clause_id": "c1", "text": "원문"}], rows, {})
-    assert calls == [8, 4, 2]
+        reviewer().judge([{"clause_id": "c1", "text": "원문"}], reviews(), {})
+    assert calls == [2]
 
 
 def test_invalid_candidate_citation_is_discarded_without_losing_other_answers(monkeypatch, caplog):

@@ -1,0 +1,322 @@
+{
+  "method": "FastAPI TestClient; real API routes, DB, classifier, RAG, Gemini; gold file not read",
+  "cases": [
+    {
+      "case_id": "C01",
+      "contract_file": "C01-complete.txt",
+      "input_sha256": "293b23382961b799cb42144a62eb78cecf658069d1847d514d9a89aacda70201",
+      "contract_id": "7f4337b3-d479-4d96-82bd-2c5297f905db",
+      "elapsed_seconds": 17.56,
+      "job_id": "f4082cbf-438b-42bc-abc9-f3356d756ee7",
+      "job_status": "SUCCEEDED",
+      "job_stage": "EXPLAIN",
+      "error_code": null,
+      "model_versions": {
+        "gemini_model": "gemini-3.1-flash-lite",
+        "classifier_model": "hur03/checkit-contract-classifier-multilabel-hard-v1",
+        "classifier_revision": "5f2a15e5fb7538c1ac0d0c12de4c65cf1c9e9e23"
+      },
+      "corpus_version": "employment_basic_v004",
+      "rule_version": "employment_rules_v1",
+      "summary": "9개 조항, 1개 항목 검토: CAUTION 0건, MISSING_SUSPECTED 0건, NEEDS_CONFIRMATION 1건, PRESENT 0건",
+      "items": [
+        {
+          "check_code": "MISSING_WAGE_PAYMENT",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "PRESENT",
+          "quoted_text": "6. 임금 지급: 매월 말일에 근로자 명의 계좌로 이체한다.",
+          "explanation": "계약서 기재는 확인했지만 적용 법령 근거를 검증하지 못했습니다.",
+          "required_information": [
+            "임금 지급 방법"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "임금"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WAGE_PAYMENT",
+            "explanation": "임금 지급 방법의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0001",
+            "source_locations": [
+              {
+                "page": 1,
+                "clause_id": "7f4337b3-d479-4d96-82bd-2c5297f905db:c0007"
+              }
+            ],
+            "retrieval_warnings": [],
+            "required_information": [
+              "임금 지급 방법"
+            ]
+          }
+        }
+      ],
+      "citation_count": 0
+    },
+    {
+      "case_id": "C02",
+      "contract_file": "C02-missing-a.txt",
+      "input_sha256": "f977e7e6a4beec416ea17d3f60bc46d8ffb2bb2a858341ca0040312b87cf248c",
+      "contract_id": "ef6608b8-bee7-41b1-ac51-5aae2aec7706",
+      "elapsed_seconds": 16.1,
+      "job_id": "c32fc6a3-422b-4c7f-ab56-83f9c17ff35f",
+      "job_status": "FAILED",
+      "job_stage": "EVALUATE",
+      "error_code": "LLM_UNAVAILABLE"
+    },
+    {
+      "case_id": "C03",
+      "contract_file": "C03-missing-b.txt",
+      "input_sha256": "31aad2f23e1108943c8884966619ea0286de504af522891168827c7b716c393a",
+      "contract_id": "d47cfd36-745a-484a-b6b4-6101d9e87791",
+      "elapsed_seconds": 18.66,
+      "job_id": "8b3a7917-097a-4110-a3cf-3fcc04e3c8f0",
+      "job_status": "SUCCEEDED",
+      "job_stage": "EXPLAIN",
+      "error_code": null,
+      "model_versions": {
+        "gemini_model": "gemini-3.1-flash-lite",
+        "classifier_model": "hur03/checkit-contract-classifier-multilabel-hard-v1",
+        "classifier_revision": "5f2a15e5fb7538c1ac0d0c12de4c65cf1c9e9e23"
+      },
+      "corpus_version": "employment_basic_v004",
+      "rule_version": "employment_rules_v1",
+      "summary": "5개 조항, 7개 항목 검토: CAUTION 1건, MISSING_SUSPECTED 5건, NEEDS_CONFIRMATION 1건, PRESENT 0건",
+      "items": [
+        {
+          "check_code": "MISSING_WAGE_PAYMENT",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": "PRESENT",
+          "quoted_text": "3. 임금 지급: 매월 25일에 근로자 명의 계좌로 이체한다.",
+          "explanation": "계약서 기재는 확인했지만 적용 법령 근거를 검증하지 못했습니다.",
+          "required_information": [
+            "임금 지급 방법"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "임금"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WAGE_PAYMENT",
+            "explanation": "임금 지급 방법의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0002",
+            "source_locations": [
+              {
+                "page": 1,
+                "clause_id": "d47cfd36-745a-484a-b6b4-6101d9e87791:c0004"
+              }
+            ],
+            "retrieval_warnings": [],
+            "required_information": [
+              "임금 지급 방법"
+            ]
+          }
+        },
+        {
+          "check_code": "DISCOVERED_MISSING",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": null,
+          "quoted_text": null,
+          "explanation": "소정근로시간, 연차 유급휴가, 종사할 업무가 계약서에 명시되어 있지 않습니다.",
+          "required_information": [
+            "소정근로시간",
+            "연차 유급휴가",
+            "종사할 업무"
+          ],
+          "rule_candidate": {
+            "labels": [],
+            "source": "GEMINI",
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "DISCOVERED_MISSING",
+            "quoted_text": null,
+            "candidate_id": "scan_document",
+            "source_locations": []
+          }
+        },
+        {
+          "check_code": "MISSING_ANNUAL_LEAVE",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": "ABSENT",
+          "quoted_text": null,
+          "explanation": "계약서에서 연차 유급휴가 관련 문구를 찾지 못했습니다.",
+          "required_information": [
+            "연차 유급휴가"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "휴가"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_ANNUAL_LEAVE",
+            "explanation": "연차 유급휴가의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "MISSING_SUSPECTED",
+            "candidate_id": "candidate_0004",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "연차 유급휴가"
+            ]
+          }
+        },
+        {
+          "check_code": "DISCOVERED_ISSUE",
+          "status": "CAUTION",
+          "document_presence": null,
+          "quoted_text": "2. 임금 계산: 실제 근로시간에 시간당 12,000원을 곱하여 산정한다.",
+          "explanation": "임금의 구성항목 및 계산방법에 대한 구체적인 명시가 부족하여 근로기준법 제17조 및 시행령 제27조의2 위반 소지가 있습니다.",
+          "required_information": [
+            "임금 구성항목",
+            "임금 계산방법"
+          ],
+          "rule_candidate": {
+            "labels": [],
+            "source": "GEMINI",
+            "category": "LEGAL_RISK",
+            "clause_id": "d47cfd36-745a-484a-b6b4-6101d9e87791:c0003",
+            "check_code": "DISCOVERED_ISSUE",
+            "quoted_text": "2. 임금 계산: 실제 근로시간에 시간당 12,000원을 곱하여 산정한다.",
+            "candidate_id": "scan_0003",
+            "source_locations": [
+              {
+                "page": 1,
+                "clause_id": "d47cfd36-745a-484a-b6b4-6101d9e87791:c0003"
+              }
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_WAGE_COMPONENTS",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": "ABSENT",
+          "quoted_text": null,
+          "explanation": "계약서에서 임금 구성 항목 관련 문구를 찾지 못했습니다.",
+          "required_information": [
+            "임금 구성 항목"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "임금"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WAGE_COMPONENTS",
+            "explanation": "임금 구성 항목의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0001",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "임금 구성 항목"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_DUTIES",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": "ABSENT",
+          "quoted_text": null,
+          "explanation": "계약서에서 종사할 업무 관련 문구를 찾지 못했습니다.",
+          "required_information": [
+            "종사할 업무"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "근무 장소·업무"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_DUTIES",
+            "explanation": "종사할 업무의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0005",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "종사할 업무"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_SCHEDULED_HOURS",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": "ABSENT",
+          "quoted_text": null,
+          "explanation": "계약서에서 소정근로시간 관련 문구를 찾지 못했습니다.",
+          "required_information": [
+            "소정근로시간"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "근로시간"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_SCHEDULED_HOURS",
+            "explanation": "소정근로시간의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0003",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "소정근로시간"
+            ]
+          }
+        }
+      ],
+      "citation_count": 10
+    },
+    {
+      "case_id": "C04",
+      "contract_file": "C04-unconfirmed-attachment.txt",
+      "input_sha256": "c293e4370fe9ddd49588b82c5eaf15c7e2de40768d51013aa0375df4216a8f76",
+      "contract_id": "4773ddf4-c1c9-49ba-915b-f67eb773546b",
+      "elapsed_seconds": 13.2,
+      "job_id": "f5b7357e-729f-4c17-867a-fab23854c616",
+      "job_status": "SUCCEEDED",
+      "job_stage": "EXPLAIN",
+      "error_code": null,
+      "model_versions": {
+        "gemini_model": "gemini-3.1-flash-lite",
+        "classifier_model": "hur03/checkit-contract-classifier-multilabel-hard-v1",
+        "classifier_revision": "5f2a15e5fb7538c1ac0d0c12de4c65cf1c9e9e23"
+      },
+      "corpus_version": "employment_basic_v004",
+      "rule_version": "employment_rules_v1",
+      "summary": "9개 조항, 1개 항목 검토: CAUTION 0건, MISSING_SUSPECTED 0건, NEEDS_CONFIRMATION 1건, PRESENT 0건",
+      "items": [
+        {
+          "check_code": "DISCOVERED_MISSING",
+          "status": "NEEDS_CONFIRMATION",
+          "document_presence": null,
+          "quoted_text": null,
+          "explanation": "적용 시점과 법령 근거를 검증할 수 없어 판단을 보류합니다. 법령 인용을 검증할 수 없어 추가 판단을 보류합니다.",
+          "required_information": [
+            "퇴직급여제도 설정 여부"
+          ],
+          "rule_candidate": {
+            "labels": [],
+            "source": "GEMINI",
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "DISCOVERED_MISSING",
+            "quoted_text": null,
+            "candidate_id": "scan_document",
+            "source_locations": []
+          }
+        }
+      ],
+      "citation_count": 0
+    }
+  ]
+}

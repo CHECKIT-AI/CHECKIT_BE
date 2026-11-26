@@ -1,0 +1,4 @@
+case_id,check_code,expected_detection,contract_evidence,legal_basis,review_status
+N02,MINIMUM_WAGE,DETECT,"기본 시급 9,000원","2026년 최저임금 고시(시급 10,320원)",PENDING_EXPERT_REVIEW
+N03,PRESET_PENALTY,DETECT,근로자가 중도 퇴사하면 위약금 100만원을 지급한다.,근로기준법 제20조,PENDING_EXPERT_REVIEW
+N04,INSUFFICIENT_BREAK,DETECT,휴게는 13:00~13:30이다. 하루 8시간·주 40시간 근로한다.,근로기준법 제54조,PENDING_EXPERT_REVIEW

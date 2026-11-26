@@ -1,0 +1,202 @@
+{
+  "method": "FastAPI TestClient; real API routes, DB, classifier, RAG, Gemini; gold file not read",
+  "cases": [
+    {
+      "case_id": "C02",
+      "contract_file": "C02-missing-a.txt",
+      "input_sha256": "f977e7e6a4beec416ea17d3f60bc46d8ffb2bb2a858341ca0040312b87cf248c",
+      "contract_id": "ff2c79b1-72b5-4727-a6de-842f85de32fa",
+      "elapsed_seconds": 16.49,
+      "job_id": "f96a8e35-e246-4788-823b-66d1fc84d82b",
+      "job_status": "SUCCEEDED",
+      "job_stage": "EXPLAIN",
+      "error_code": null,
+      "model_versions": {
+        "gemini_model": "gemini-3.1-flash-lite",
+        "classifier_model": "hur03/checkit-contract-classifier-multilabel-hard-v1",
+        "classifier_revision": "5f2a15e5fb7538c1ac0d0c12de4c65cf1c9e9e23"
+      },
+      "corpus_version": "employment_basic_v004",
+      "rule_version": "employment_rules_v1",
+      "summary": "5개 조항, 7개 항목 검토: CAUTION 0건, MISSING_SUSPECTED 7건, NEEDS_CONFIRMATION 0건, PRESENT 0건",
+      "items": [
+        {
+          "check_code": "MISSING_WORKPLACE",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": "ABSENT",
+          "quoted_text": null,
+          "explanation": "계약서에서 근무 장소 관련 문구를 찾지 못했습니다.",
+          "required_information": [
+            "근무 장소"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "근무 장소·업무"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WORKPLACE",
+            "explanation": "근무 장소의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0004",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "근무 장소"
+            ]
+          }
+        },
+        {
+          "check_code": "MISSING_WAGE_CALCULATION",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": "ABSENT",
+          "quoted_text": null,
+          "explanation": "계약서에서 임금 계산 방법 관련 문구를 찾지 못했습니다.",
+          "required_information": [
+            "임금 계산 방법"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "임금"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WAGE_CALCULATION",
+            "explanation": "임금 계산 방법의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0001",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "임금 계산 방법"
+            ]
+          }
+        },
+        {
+          "check_code": "DISCOVERED_MISSING",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": null,
+          "quoted_text": null,
+          "explanation": "근무장소가 명시되지 않았습니다.",
+          "required_information": [
+            "근무장소"
+          ],
+          "rule_candidate": {
+            "labels": [],
+            "source": "GEMINI",
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "DISCOVERED_MISSING",
+            "quoted_text": null,
+            "candidate_id": "scan_document",
+            "source_locations": []
+          }
+        },
+        {
+          "check_code": "DISCOVERED_MISSING",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": null,
+          "quoted_text": null,
+          "explanation": "임금의 계산방법 및 지급방법이 명시되지 않았습니다.",
+          "required_information": [
+            "임금 계산방법",
+            "임금 지급방법"
+          ],
+          "rule_candidate": {
+            "labels": [],
+            "source": "GEMINI",
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "DISCOVERED_MISSING",
+            "quoted_text": null,
+            "candidate_id": "scan_document",
+            "source_locations": []
+          }
+        },
+        {
+          "check_code": "MISSING_WAGE_PAYMENT",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": "ABSENT",
+          "quoted_text": null,
+          "explanation": "계약서에서 임금 지급 방법 관련 문구를 찾지 못했습니다.",
+          "required_information": [
+            "임금 지급 방법"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "임금"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_WAGE_PAYMENT",
+            "explanation": "임금 지급 방법의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "NEEDS_CONFIRMATION",
+            "candidate_id": "candidate_0002",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "임금 지급 방법"
+            ]
+          }
+        },
+        {
+          "check_code": "DISCOVERED_MISSING",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": null,
+          "quoted_text": null,
+          "explanation": "휴일이 명시되지 않았습니다.",
+          "required_information": [
+            "휴일"
+          ],
+          "rule_candidate": {
+            "labels": [],
+            "source": "GEMINI",
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "DISCOVERED_MISSING",
+            "quoted_text": null,
+            "candidate_id": "scan_document",
+            "source_locations": []
+          }
+        },
+        {
+          "check_code": "MISSING_HOLIDAY",
+          "status": "MISSING_SUSPECTED",
+          "document_presence": "ABSENT",
+          "quoted_text": null,
+          "explanation": "계약서에서 휴일 관련 문구를 찾지 못했습니다.",
+          "required_information": [
+            "휴일"
+          ],
+          "rule_candidate": {
+            "labels": [
+              "휴일"
+            ],
+            "category": "MISSING",
+            "clause_id": null,
+            "check_code": "MISSING_HOLIDAY",
+            "explanation": "휴일의 명시 여부를 확인해야 합니다.",
+            "quoted_text": null,
+            "status_hint": "MISSING_SUSPECTED",
+            "candidate_id": "candidate_0003",
+            "source_locations": [],
+            "retrieval_warnings": [],
+            "required_information": [
+              "휴일"
+            ]
+          }
+        }
+      ],
+      "citation_count": 7
+    }
+  ],
+  "cleanup": [
+    {
+      "contract_id": "ff2c79b1-72b5-4727-a6de-842f85de32fa",
+      "http_status": 204
+    }
+  ]
+}

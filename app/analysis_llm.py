@@ -54,10 +54,6 @@ class LLMInputTooLarge(LLMUnavailable):
     pass
 
 
-class LLMReadTimeout(LLMUnavailable):
-    pass
-
-
 class InvalidGeminiResponse(ValueError):
     """A fixed diagnostic reason that never contains provider output or contract text."""
 
@@ -77,7 +73,7 @@ class GeminiReviewer:
         logger.info("Gemini evaluation started: job_id=%s clause_count=%d review_count=%d",
                     correlation_id, len(clauses), len(reviews))
         try:
-            answers = self._judge(clauses, reviews, context, correlation_id)
+            answers = self._request(clauses, reviews, context, correlation_id)
             logger.info("Gemini evaluation completed: job_id=%s answer_count=%d",
                         correlation_id, len(answers))
             return answers
@@ -88,20 +84,6 @@ class GeminiReviewer:
             logger.warning("Gemini evaluation unavailable: job_id=%s error_type=%s",
                            correlation_id, type(exc).__name__)
             raise
-
-    def _judge(self, clauses, reviews, context, correlation_id, timeout_splits=2):
-        # shortcut: two timeout splits bound provider calls; revisit if larger documents need more.
-        try:
-            return self._request(clauses, reviews, context, correlation_id)
-        except (LLMInputTooLarge, LLMReadTimeout) as exc:
-            if len(reviews) == 1 or (isinstance(exc, LLMReadTimeout) and not timeout_splits):
-                raise
-            midpoint = len(reviews) // 2
-            remaining = timeout_splits - 1 if isinstance(exc, LLMReadTimeout) else timeout_splits
-            logger.info("Gemini request split: job_id=%s review_count=%d reason=%s",
-                        correlation_id, len(reviews), type(exc).__name__)
-            return {**self._judge(clauses, reviews[:midpoint], context, correlation_id, remaining),
-                    **self._judge(clauses, reviews[midpoint:], context, correlation_id, remaining)}
 
     def _request(self, clauses, reviews, context, correlation_id):
         key = self.settings.gemini_api_key.get_secret_value()
@@ -186,120 +168,108 @@ class GeminiReviewer:
         }]}], "generationConfig": {"responseMimeType": "application/json",
                                 "responseSchema": schema, "temperature": 0}}
         law_hit_count = len(laws)
-        for attempt in range(2):
-            try:
-                logger.info("Gemini request started: job_id=%s attempt=%d review_count=%d law_hit_count=%d",
-                            correlation_id, attempt + 1, len(reviews), law_hit_count)
-                with httpx.Client(timeout=self.settings.gemini_timeout_seconds) as client:
-                    response = client.post(url, headers={"x-goog-api-key": key}, json=body)
-                    if response.status_code == 413 or (
-                        response.status_code == 400 and any(
-                            term in response.text.lower() for term in (
-                                "token limit", "token count", "too many tokens",
-                                "context window", "context length", "input size"
-                            )
+        try:
+            logger.info("Gemini request started: job_id=%s review_count=%d law_hit_count=%d",
+                        correlation_id, len(reviews), law_hit_count)
+            with httpx.Client(timeout=self.settings.gemini_timeout_seconds) as client:
+                response = client.post(url, headers={"x-goog-api-key": key}, json=body)
+                if response.status_code == 413 or (
+                    response.status_code == 400 and any(
+                        term in response.text.lower() for term in (
+                            "token limit", "token count", "too many tokens",
+                            "context window", "context length", "input size"
                         )
-                    ):
-                        logger.warning("Gemini request input limit: job_id=%s http_status=%d",
-                                       correlation_id, response.status_code)
-                        raise LLMInputTooLarge("Gemini input limit exceeded")
-                    response.raise_for_status()
-                    data = response.json()
-                content = data["candidates"][0]
-                if content.get("finishReason") == "MAX_TOKENS":
-                    logger.warning("Gemini response output limit: job_id=%s", correlation_id)
-                    raise LLMInputTooLarge("Gemini output limit exceeded")
-                if content.get("finishReason") != "STOP":
-                    raise InvalidGeminiResponse("INCOMPLETE_OUTPUT")
-                batch = ReviewBatch.model_validate_json(content["content"]["parts"][0]["text"])
-                answers = {item.candidate_id: item for item in batch.items}
-                if len(answers) != len(batch.items) or set(answers) != set(allowed):
-                    raise InvalidGeminiResponse("MISSING_OR_DUPLICATE_JUDGMENT")
-                by_id = {candidate["candidate_id"]: candidate for candidate, _ in reviews}
-                clauses_by_id = {clause["clause_id"]: clause["text"] for clause in clauses}
-                for item in batch.items:
-                    candidate = by_id[item.candidate_id]
-                    if _invalid_citations(item.citation_chunk_ids, allowed[item.candidate_id]):
-                        logger.warning("Gemini citation discarded: job_id=%s candidate_id=%s",
+                    )
+                ):
+                    logger.warning("Gemini request input limit: job_id=%s http_status=%d",
+                                   correlation_id, response.status_code)
+                    raise LLMInputTooLarge("Gemini input limit exceeded")
+                response.raise_for_status()
+                data = response.json()
+            content = data["candidates"][0]
+            if content.get("finishReason") == "MAX_TOKENS":
+                logger.warning("Gemini response output limit: job_id=%s", correlation_id)
+                raise LLMInputTooLarge("Gemini output limit exceeded")
+            if content.get("finishReason") != "STOP":
+                raise InvalidGeminiResponse("INCOMPLETE_OUTPUT")
+            batch = ReviewBatch.model_validate_json(content["content"]["parts"][0]["text"])
+            answers = {item.candidate_id: item for item in batch.items}
+            if len(answers) != len(batch.items) or set(answers) != set(allowed):
+                raise InvalidGeminiResponse("MISSING_OR_DUPLICATE_JUDGMENT")
+            by_id = {candidate["candidate_id"]: candidate for candidate, _ in reviews}
+            clauses_by_id = {clause["clause_id"]: clause["text"] for clause in clauses}
+            for item in batch.items:
+                candidate = by_id[item.candidate_id]
+                if _invalid_citations(item.citation_chunk_ids, allowed[item.candidate_id]):
+                    logger.warning("Gemini citation discarded: job_id=%s candidate_id=%s",
+                                   correlation_id, item.candidate_id)
+                    item.citation_chunk_ids = []
+                    if candidate["category"] != "DISADVANTAGE":
+                        item.status = "NEEDS_CONFIRMATION"
+                        item.explanation = "법령 인용을 검증할 수 없어 판단을 보류합니다."
+                if candidate["category"] == "MISSING":
+                    if item.document_presence is None or (
+                        item.document_presence == "PRESENT" and (
+                            not item.document_quote or not item.document_clause_id or
+                            item.document_quote not in clauses_by_id.get(item.document_clause_id, "")
+                        )
+                    ) or (item.document_presence != "PRESENT" and (
+                        item.document_quote is not None or item.document_clause_id is not None
+                    )):
+                        logger.warning("Gemini document evidence discarded: job_id=%s candidate_id=%s",
                                        correlation_id, item.candidate_id)
-                        item.citation_chunk_ids = []
-                        if candidate["category"] != "DISADVANTAGE":
-                            item.status = "NEEDS_CONFIRMATION"
-                            item.explanation = "법령 인용을 검증할 수 없어 판단을 보류합니다."
-                    if candidate["category"] == "MISSING":
-                        if item.document_presence is None or (
-                            item.document_presence == "PRESENT" and (
-                                not item.document_quote or not item.document_clause_id or
-                                item.document_quote not in clauses_by_id.get(item.document_clause_id, "")
-                            )
-                        ) or (item.document_presence != "PRESENT" and (
-                            item.document_quote is not None or item.document_clause_id is not None
-                        )):
-                            logger.warning("Gemini document evidence discarded: job_id=%s candidate_id=%s",
-                                           correlation_id, item.candidate_id)
-                            item.document_presence = "UNCLEAR"
-                            item.document_quote = None
-                            item.document_clause_id = None
-                            item.citation_chunk_ids = []
-                            item.status = "NEEDS_CONFIRMATION"
-                            item.explanation = "계약서 기재 여부를 검증할 수 없어 판단을 보류합니다."
-                    else:
-                        item.document_presence = None
+                        item.document_presence = "UNCLEAR"
                         item.document_quote = None
                         item.document_clause_id = None
-                    if item.findings and candidate["category"] not in {"CLAUSE_SCAN", "DOCUMENT_SCAN"}:
-                        logger.warning("Gemini non-scan findings ignored: job_id=%s candidate_id=%s count=%d",
-                                       correlation_id, item.candidate_id, len(item.findings))
-                        item.findings = []
-                    if candidate["category"] == "DOCUMENT_SCAN":
-                        valid_findings = [finding for finding in item.findings if finding.category == "MISSING"]
-                    elif candidate["category"] == "CLAUSE_SCAN":
-                        valid_findings = [finding for finding in item.findings if finding.category != "MISSING"]
-                    else:
-                        valid_findings = item.findings
-                    if len(valid_findings) != len(item.findings):
-                        logger.warning("Gemini finding discarded: job_id=%s candidate_id=%s count=%d",
-                                       correlation_id, item.candidate_id, len(item.findings) - len(valid_findings))
-                        item.findings = valid_findings
-                    for finding in item.findings:
-                        if _invalid_citations(finding.citation_chunk_ids, allowed[item.candidate_id]):
-                            logger.warning("Gemini finding citation discarded: job_id=%s candidate_id=%s",
-                                           correlation_id, item.candidate_id)
-                            finding.citation_chunk_ids = []
-                            finding.explanation = "법령 인용을 검증할 수 없어 추가 판단을 보류합니다."
-                logger.info("Gemini request completed: job_id=%s attempt=%d answer_count=%d",
-                            correlation_id, attempt + 1, len(answers))
-                return answers
-            except LLMInputTooLarge:
-                raise
-            except httpx.ReadTimeout:
-                logger.warning("Gemini read timeout: job_id=%s attempt=%d review_count=%d",
-                               correlation_id, attempt + 1, len(reviews))
-                if len(reviews) > 1 or attempt:
-                    raise LLMReadTimeout("Gemini read timed out") from None
-            except httpx.HTTPStatusError as exc:
-                if attempt:
-                    logger.warning("Gemini request failed: job_id=%s attempt=%d http_status=%d",
-                                   correlation_id, attempt + 1, exc.response.status_code)
-                    raise LLMUnavailable("Gemini judgment failed") from None
-                logger.warning("Gemini request retrying: job_id=%s attempt=%d http_status=%d",
-                               correlation_id, attempt + 1, exc.response.status_code)
-            except httpx.HTTPError as exc:
-                if attempt:
-                    logger.warning("Gemini request failed: job_id=%s attempt=%d error_type=%s",
-                                   correlation_id, attempt + 1, type(exc).__name__)
-                    raise LLMUnavailable("Gemini judgment failed") from None
-                logger.warning("Gemini request retrying: job_id=%s attempt=%d error_type=%s",
-                               correlation_id, attempt + 1, type(exc).__name__)
-            except InvalidGeminiResponse as exc:
-                logger.warning("Gemini response rejected: job_id=%s attempt=%d reason=%s",
-                               correlation_id, attempt + 1, str(exc))
-                if attempt:
-                    raise LLMUnavailable("Gemini judgment failed") from None
-            except (KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
-                if attempt:
-                    logger.warning("Gemini response rejected: job_id=%s attempt=%d error_type=%s",
-                                   correlation_id, attempt + 1, type(exc).__name__)
-                    raise LLMUnavailable("Gemini judgment failed") from None
-                logger.warning("Gemini request retrying: job_id=%s attempt=%d error_type=%s",
-                               correlation_id, attempt + 1, type(exc).__name__)
+                        item.citation_chunk_ids = []
+                        item.status = "NEEDS_CONFIRMATION"
+                        item.explanation = "계약서 기재 여부를 검증할 수 없어 판단을 보류합니다."
+                else:
+                    item.document_presence = None
+                    item.document_quote = None
+                    item.document_clause_id = None
+                if item.findings and candidate["category"] not in {"CLAUSE_SCAN", "DOCUMENT_SCAN"}:
+                    logger.warning("Gemini non-scan findings ignored: job_id=%s candidate_id=%s count=%d",
+                                   correlation_id, item.candidate_id, len(item.findings))
+                    item.findings = []
+                if candidate["category"] == "DOCUMENT_SCAN":
+                    valid_findings = [finding for finding in item.findings if finding.category == "MISSING"]
+                elif candidate["category"] == "CLAUSE_SCAN":
+                    valid_findings = [finding for finding in item.findings if finding.category != "MISSING"]
+                else:
+                    valid_findings = item.findings
+                if len(valid_findings) != len(item.findings):
+                    logger.warning("Gemini finding discarded: job_id=%s candidate_id=%s count=%d",
+                                   correlation_id, item.candidate_id, len(item.findings) - len(valid_findings))
+                    item.findings = valid_findings
+                for finding in item.findings:
+                    if _invalid_citations(finding.citation_chunk_ids, allowed[item.candidate_id]):
+                        logger.warning("Gemini finding citation discarded: job_id=%s candidate_id=%s",
+                                       correlation_id, item.candidate_id)
+                        finding.citation_chunk_ids = []
+                        finding.explanation = "법령 인용을 검증할 수 없어 추가 판단을 보류합니다."
+            logger.info("Gemini request completed: job_id=%s answer_count=%d",
+                        correlation_id, len(answers))
+            return answers
+        except LLMInputTooLarge:
+            raise
+        except httpx.ReadTimeout:
+            logger.warning("Gemini read timeout: job_id=%s review_count=%d",
+                           correlation_id, len(reviews))
+            raise LLMUnavailable("Gemini read timed out") from None
+        except httpx.HTTPStatusError as exc:
+            logger.warning("Gemini request failed: job_id=%s http_status=%d",
+                           correlation_id, exc.response.status_code)
+            raise LLMUnavailable("Gemini judgment failed") from None
+        except httpx.HTTPError as exc:
+            logger.warning("Gemini request failed: job_id=%s error_type=%s",
+                           correlation_id, type(exc).__name__)
+            raise LLMUnavailable("Gemini judgment failed") from None
+        except InvalidGeminiResponse as exc:
+            logger.warning("Gemini response rejected: job_id=%s reason=%s",
+                           correlation_id, str(exc))
+            raise LLMUnavailable("Gemini judgment failed") from None
+        except (KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
+            logger.warning("Gemini response rejected: job_id=%s error_type=%s",
+                           correlation_id, type(exc).__name__)
+            raise LLMUnavailable("Gemini judgment failed") from None

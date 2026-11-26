@@ -21,7 +21,7 @@
   <button type="submit">이메일 로그인</button>
   <button id="signup" type="button">새 계정 회원가입</button>
 </form>
-<p>파일은 브라우저에서만 읽습니다. OCR 결과를 원본과 대조하고 이름·주소·연락처·계좌번호 등 식별정보를 직접 가리세요. 임금·시간·날짜는 판단에 필요합니다. 전송한 텍스트와 분석 결과는 회원 계약서 기록으로 DB에 남습니다.</p>
+<p><strong>팀 개발용: 가상 계약서 또는 충분히 마스킹한 테스트 문서만 사용하세요.</strong> 파일은 브라우저에서만 읽지만, 확인한 텍스트와 분석 결과는 공유 개발 DB에 남고 분석 텍스트는 Gemini API로 전송됩니다. 자동 탐지는 이름·주소·계좌번호 등을 모두 찾아내지 못합니다. OCR 결과를 원본과 대조하고 식별정보를 직접 가리세요.</p>
 <label>PDF 한 개 또는 순서대로 정렬된 JPG·PNG 최대 10장
   <input id="files" type="file" accept="application/pdf,image/jpeg,image/png" multiple>
 </label>
@@ -30,7 +30,7 @@
 <label>계약 적용일 <input id="effective" type="date"></label>
 <label>상시 근로자 수 <input id="employees" type="number" min="1" max="100000"></label>
 <label>주당 근로시간 <input id="hours" type="number" min="0.1" max="168" step="0.1"></label>
-<label><input id="privacy" type="checkbox"> 모든 페이지를 원본과 대조했고 개인정보를 마스킹했습니다.</label>
+<label><input id="privacy" type="checkbox"> 가상 또는 충분히 마스킹한 테스트 문서이며, 모든 페이지를 원본과 대조했습니다.</label>
 <label><input id="notice" type="checkbox"> 마스킹한 계약 문구가 Gemini API로 전송됨을 확인했습니다.</label>
 <button id="analyze">확정 텍스트 저장 후 분석</button>
 <p id="status" role="status" aria-live="polite">파일을 선택하세요.</p>
